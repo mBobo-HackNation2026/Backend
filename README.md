@@ -17,10 +17,16 @@ zgadywania przez AI.
 
 ## Status
 
-Obecnie gotowy jest szkielet aplikacji: konfiguracja, CORS, obsługa błędów,
-Swagger oraz `GET /api/v1/health`. Moduły domenowe (kalkulator świadczeń,
-weryfikacja uprawnień, upload/analiza PDF, integracje ZUS/mObywatel) będą
-dodawane iteracyjnie w `app/services`, `app/rules` i `app/api/v1/endpoints`.
+Obecnie gotowy jest szkielet aplikacji (konfiguracja, CORS, obsługa błędów,
+Swagger, `GET /api/v1/health`) oraz pierwszy silnik uprawnień:
+`POST /api/v1/eligibility/check` ocenia uprawnienie do zasiłku
+macierzyńskiego za okres urlopu macierzyńskiego i zwraca ustrukturyzowaną
+odpowiedź (status / uzasadnienie / możliwe rozwiązania / plan), zamiast
+prostego tak/nie - łącznie z wykrywaniem alternatywnej ścieżki (zasiłek w
+wysokości zasiłku macierzyńskiego) z ustawy zasiłkowej art. 30. Kolejne
+świadczenia i moduły (kalkulator, upload/analiza PDF, integracje
+ZUS/mObywatel) będą dodawane iteracyjnie w `app/services`, `app/eligibility`,
+`app/rules` i `app/api/v1/endpoints`.
 
 ## Struktura projektu
 
