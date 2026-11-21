@@ -27,6 +27,8 @@ from app.rules.seed import (
     PARENTAL_LEAVE_BENEFIT_NAME,
     PATERNITY_LEAVE_BENEFIT_CODE,
     PATERNITY_LEAVE_BENEFIT_NAME,
+    REHABILITATION_BENEFIT_CODE,
+    REHABILITATION_BENEFIT_NAME,
     SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
     SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
     STILLBIRTH_FUNERAL_BENEFIT_CODE,
@@ -718,6 +720,165 @@ def evaluate_sickness_benefit_during_pregnancy_eligibility(
     return EligibilityResult(
         benefit_code=SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
         benefit_name=SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
+    )
+
+
+_REHABILITATION_RATE_FIRST_3_MONTHS = Decimal("90.00")
+_REHABILITATION_RATE_PREGNANT = Decimal("100.00")
+_REHABILITATION_MAX_DURATION_DESCRIPTION = "do 12 miesięcy"
+
+
+def _build_rehabilitation_benefit_plan(
+    rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest, rate_percentage: Decimal
+) -> BenefitPlan:
+    is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+    required_documents = [
+        RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+        for doc in rule.required_documents
+        if _document_applies(doc, is_self_employed)
+    ]
+    return BenefitPlan(
+        weeks=None,
+        duration_description=_REHABILITATION_MAX_DURATION_DESCRIPTION,
+        rate_percentage=rate_percentage,
+        institution=rule.institution,
+        required_documents=required_documents,
+        deadlines=list(rule.deadlines),
+        legal_basis=list(rule.legal_basis),
+    )
+
+
+def evaluate_rehabilitation_benefit_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    if request.sickness_benefit_period_exhausted is None:
+        missing_data.append("czy wyczerpano maksymalny okres zasiłku chorobowego")
+    elif request.sickness_benefit_period_exhausted:
+        met_conditions.append(
+            "wyczerpano maksymalny okres zasiłku chorobowego (ustawa zasiłkowa art. 18 "
+            "ust. 1)"
+        )
+    else:
+        unmet_conditions.append(
+            "nie wyczerpano jeszcze maksymalnego okresu zasiłku chorobowego - "
+            "świadczenie rehabilitacyjne przysługuje dopiero po jego wyczerpaniu"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Świadczenie rehabilitacyjne można uzyskać dopiero po wyczerpaniu "
+                    "maksymalnego okresu zasiłku chorobowego (182 dni, albo 270 dni w "
+                    "okresie ciąży)."
+                ),
+                legal_basis="ustawa zasiłkowa art. 18 ust. 1",
+            )
+        )
+
+    if request.medical_prognosis_recovery_possible is None:
+        missing_data.append(
+            "czy lekarz orzecznik ZUS stwierdził rokowanie odzyskania zdolności do pracy"
+        )
+    elif request.medical_prognosis_recovery_possible:
+        met_conditions.append(
+            "lekarz orzecznik ZUS stwierdził rokowanie odzyskania zdolności do pracy "
+            "(ustawa zasiłkowa art. 18 ust. 1)"
+        )
+    else:
+        unmet_conditions.append(
+            "brak pozytywnego rokowania lekarza orzecznika ZUS co do odzyskania "
+            "zdolności do pracy"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Bez pozytywnego rokowania lekarza orzecznika ZUS świadczenie "
+                    "rehabilitacyjne nie przysługuje - rozważ wniosek o rentę z tytułu "
+                    "niezdolności do pracy (poza zakresem tego silnika)."
+                ),
+                legal_basis="ustawa zasiłkowa art. 18 ust. 1",
+            )
+        )
+
+    if request.excluded_from_rehabilitation_benefit is None:
+        missing_data.append(
+            "czy przysługuje już inne świadczenie wykluczające prawo do świadczenia "
+            "rehabilitacyjnego"
+        )
+    elif request.excluded_from_rehabilitation_benefit:
+        unmet_conditions.append(
+            "przysługuje inne świadczenie wykluczające prawo do świadczenia "
+            "rehabilitacyjnego (ustawa zasiłkowa art. 18 ust. 7)"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Emerytura, renta, zasiłek dla bezrobotnych, świadczenie "
+                    "przedemerytalne, rodzicielskie świadczenie uzupełniające, "
+                    "nauczycielskie świadczenie kompensacyjne i urlop dla poratowania "
+                    "zdrowia wykluczają prawo do świadczenia rehabilitacyjnego - sprawdź, "
+                    "które z nich faktycznie przysługuje."
+                ),
+                legal_basis="ustawa zasiłkowa art. 18 ust. 7",
+            )
+        )
+    else:
+        met_conditions.append(
+            "brak świadczeń wykluczających prawo do świadczenia rehabilitacyjnego "
+            "(ustawa zasiłkowa art. 18 ust. 7)"
+        )
+
+    rate_percentage: Decimal | None = None
+    if request.is_pregnant is None:
+        missing_data.append(
+            "status ciąży (wpływa na stawkę: 100% zamiast 90%/75%)"
+        )
+    elif request.is_pregnant:
+        rate_percentage = _REHABILITATION_RATE_PREGNANT
+        met_conditions.append(
+            "niezdolność do pracy w okresie ciąży - stawka 100% przez cały okres "
+            "(ustawa zasiłkowa art. 18 ust. 2)"
+        )
+    else:
+        rate_percentage = _REHABILITATION_RATE_FIRST_3_MONTHS
+        warnings.append(
+            "Stawka 90% dotyczy pierwszych 3 miesięcy świadczenia - od 4. miesiąca "
+            "obniża się do 75% (ustawa zasiłkowa art. 18 ust. 2), co nie jest jeszcze "
+            "rozbijane miesiąc po miesiącu w tym wyniku."
+        )
+
+    _apply_self_employed_debt_check(
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+    )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    plan = None
+    if is_standard_path_open and rate_percentage is not None:
+        plan = _build_rehabilitation_benefit_plan(rule, request, rate_percentage)
+
+    return EligibilityResult(
+        benefit_code=REHABILITATION_BENEFIT_CODE,
+        benefit_name=REHABILITATION_BENEFIT_NAME,
         status=status,
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,

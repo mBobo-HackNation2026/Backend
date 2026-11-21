@@ -182,6 +182,31 @@ def test_ensure_seeded_creates_sickness_during_pregnancy_rule() -> None:
         db.close()
 
 
+def test_ensure_seeded_creates_rehabilitation_benefit_rule() -> None:
+    from app.rules.seed import REHABILITATION_BENEFIT_CODE
+
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+        ensure_seeded(db)  # must be idempotent
+
+        rule = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == REHABILITATION_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
+            )
+            .one()
+        )
+
+        assert rule.rate_percentage == Decimal("90.00")
+        assert rule.weeks_by_child_count is None
+        assert rule.institution == "ZUS"
+    finally:
+        db.close()
+
+
 def test_ensure_seeded_creates_parental_leave_rule_with_za_zyciem_table() -> None:
     from app.rules.seed import PARENTAL_LEAVE_BENEFIT_CODE
 

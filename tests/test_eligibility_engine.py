@@ -9,6 +9,7 @@ from app.eligibility.engine import (
     evaluate_maternity_leave_eligibility,
     evaluate_parental_leave_eligibility,
     evaluate_paternity_leave_eligibility,
+    evaluate_rehabilitation_benefit_eligibility,
     evaluate_sickness_benefit_during_pregnancy_eligibility,
 )
 from app.eligibility.schemas import (
@@ -822,6 +823,138 @@ def test_sickness_during_pregnancy_self_employed_debt_over_threshold_is_not_elig
     )
 
     result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert any(s.type == SolutionType.corrective_action for s in result.possible_solutions)
+
+
+def _make_rehabilitation_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("90.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        legal_basis=["ustawa zasiłkowa art. 18"],
+        deadlines=["Przed upływem okresu zasiłku chorobowego"],
+        required_documents=[
+            {"code": "wniosek", "name": "Wniosek", "when": "...", "applies_to": None},
+            {"code": "z3", "name": "Z-3", "when": "...", "applies_to": "standard"},
+        ],
+    )
+
+
+def test_rehabilitation_benefit_likely_eligible_not_pregnant_gets_90_percent() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        sickness_benefit_period_exhausted=True,
+        medical_prognosis_recovery_possible=True,
+        excluded_from_rehabilitation_benefit=False,
+        is_pregnant=False,
+    )
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks is None
+    assert result.plan.duration_description == "do 12 miesięcy"
+    assert result.plan.rate_percentage == Decimal("90.00")
+    assert any("90%" in w for w in result.warnings)
+
+
+def test_rehabilitation_benefit_pregnant_gets_100_percent() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        sickness_benefit_period_exhausted=True,
+        medical_prognosis_recovery_possible=True,
+        excluded_from_rehabilitation_benefit=False,
+        is_pregnant=True,
+    )
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
+
+    assert result.plan.rate_percentage == Decimal("100.00")
+
+
+def test_rehabilitation_benefit_not_eligible_when_sickness_benefit_not_exhausted() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        sickness_benefit_period_exhausted=False,
+        medical_prognosis_recovery_possible=True,
+        excluded_from_rehabilitation_benefit=False,
+        is_pregnant=False,
+    )
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_rehabilitation_benefit_not_eligible_without_positive_prognosis() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        sickness_benefit_period_exhausted=True,
+        medical_prognosis_recovery_possible=False,
+        excluded_from_rehabilitation_benefit=False,
+        is_pregnant=False,
+    )
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_rehabilitation_benefit_not_eligible_when_excluded_by_other_benefit() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        sickness_benefit_period_exhausted=True,
+        medical_prognosis_recovery_possible=True,
+        excluded_from_rehabilitation_benefit=True,
+        is_pregnant=False,
+    )
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_rehabilitation_benefit_requires_verification_when_all_fields_missing() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1)
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert len(result.missing_data) == 4
+    assert result.plan is None
+
+
+def test_rehabilitation_benefit_self_employed_debt_over_threshold_is_not_eligible() -> None:
+    rule = _make_rehabilitation_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        sickness_benefit_period_exhausted=True,
+        medical_prognosis_recovery_possible=True,
+        excluded_from_rehabilitation_benefit=False,
+        is_pregnant=False,
+        insurance_title=InsuranceTitle.dzialalnosc_gospodarcza,
+        debt_amount_zl=Decimal("100.00"),
+    )
+
+    result = evaluate_rehabilitation_benefit_eligibility(request, rule)
 
     assert result.status == EligibilityStatus.not_eligible
     assert any(s.type == SolutionType.corrective_action for s in result.possible_solutions)

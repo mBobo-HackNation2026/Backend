@@ -5,6 +5,7 @@ ALTERNATIVE_BENEFIT_CODE = "zasilek_w_wysokosci_zasilku_macierzynskiego"
 PATERNITY_LEAVE_CODE = "urlop_ojcowski"
 PARENTAL_LEAVE_CODE = "urlop_rodzicielski"
 SICKNESS_DURING_PREGNANCY_CODE = "zasilek_chorobowy_w_ciazy"
+REHABILITATION_BENEFIT_CODE = "swiadczenie_rehabilitacyjne"
 STUB_BENEFIT_CODES = [
     "uzupelniajacy_urlop_macierzynski",
     "urlop_na_warunkach_urlopu_macierzynskiego",
@@ -218,6 +219,47 @@ def test_check_eligibility_sickness_during_pregnancy_waiting_period_not_met(
             "is_pregnant": True,
             "insurance_title": "zlecenie",
             "insured_days_continuous": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_eligible"
+    assert body["plan"] is None
+
+
+def test_check_eligibility_rehabilitation_benefit_likely_eligible(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{REHABILITATION_BENEFIT_CODE}",
+        json={
+            "children_count": 1,
+            "sickness_benefit_period_exhausted": True,
+            "medical_prognosis_recovery_possible": True,
+            "excluded_from_rehabilitation_benefit": False,
+            "is_pregnant": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert body["plan"]["duration_description"] == "do 12 miesięcy"
+    assert body["plan"]["rate_percentage"] == "90.00"
+
+
+def test_check_eligibility_rehabilitation_benefit_not_eligible_when_excluded(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{REHABILITATION_BENEFIT_CODE}",
+        json={
+            "children_count": 1,
+            "sickness_benefit_period_exhausted": True,
+            "medical_prognosis_recovery_possible": True,
+            "excluded_from_rehabilitation_benefit": True,
+            "is_pregnant": False,
         },
     )
 

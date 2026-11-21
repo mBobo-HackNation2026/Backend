@@ -17,6 +17,8 @@ ALTERNATIVE_BENEFIT_NAME = (
 )
 PATERNITY_LEAVE_BENEFIT_CODE = "urlop_ojcowski"
 PATERNITY_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu ojcowskiego"
+REHABILITATION_BENEFIT_CODE = "swiadczenie_rehabilitacyjne"
+REHABILITATION_BENEFIT_NAME = "Świadczenie rehabilitacyjne"
 
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
 # These three benefit codes are registered and return a real HTTP 200 response so the
@@ -52,6 +54,7 @@ def ensure_seeded(db: Session) -> None:
     _ensure_alternative_benefit_seeded(db)
     _ensure_paternity_leave_seeded(db)
     _ensure_sickness_during_pregnancy_seeded(db)
+    _ensure_rehabilitation_benefit_seeded(db)
     _ensure_stub_benefit_seeded(
         db,
         code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
@@ -494,6 +497,91 @@ def _ensure_sickness_during_pregnancy_seeded(db: Session) -> None:
                 "code": "zaswiadczenie_lekarskie_ezla",
                 "name": "Zaświadczenie lekarskie (e-ZLA)",
                 "when": "wystawiane elektronicznie przez lekarza, nie składane osobno",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_z3",
+                "name": "Zaświadczenie płatnika składek Z-3",
+                "when": "gdy płatnikiem zasiłku jest ZUS, a nie pracodawca",
+                "applies_to": "standard",
+            },
+        ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_rehabilitation_benefit_seeded(db: Session) -> None:
+    benefit_type = db.query(BenefitType).filter_by(code=REHABILITATION_BENEFIT_CODE).one_or_none()
+    if benefit_type is None:
+        benefit_type = BenefitType(
+            code=REHABILITATION_BENEFIT_CODE,
+            name=REHABILITATION_BENEFIT_NAME,
+            description=(
+                "Świadczenie przysługujące ubezpieczonemu, który po wyczerpaniu zasiłku "
+                "chorobowego jest nadal niezdolny do pracy, a dalsze leczenie lub "
+                "rehabilitacja rokują odzyskanie zdolności do pracy. Stawka 90% przez "
+                "pierwsze 3 miesiące, 75% przez pozostały okres, 100% w okresie ciąży; "
+                "maksymalnie 12 miesięcy."
+            ),
+        )
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        # Stawka startowa (silnik dynamicznie ustawia 100%, jeśli wnioskodawca jest w
+        # ciąży - evaluate_rehabilitation_benefit_eligibility w app/eligibility/engine.py).
+        rate_percentage=Decimal("90.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        deadlines=[
+            "Wniosek o świadczenie rehabilitacyjne - przed upływem okresu pobierania "
+            "zasiłku chorobowego, wraz z orzeczeniem lekarza orzecznika ZUS o rokowaniu "
+            "odzyskania zdolności do pracy.",
+        ],
+        legal_basis=[
+            "ustawa zasiłkowa art. 18 ust. 1 (świadczenie rehabilitacyjne po wyczerpaniu "
+            "zasiłku chorobowego, gdy dalsze leczenie lub rehabilitacja rokują "
+            "odzyskanie zdolności do pracy)",
+            "ustawa zasiłkowa art. 18 ust. 2 (stawka 90% przez pierwsze 3 miesiące, 75% "
+            "przez pozostały okres, 100% w okresie ciąży)",
+            "ustawa zasiłkowa art. 18 ust. 3 (maksymalny okres 12 miesięcy)",
+            "ustawa zasiłkowa art. 18 ust. 7 (wyłączenia: emerytura, renta, zasiłek dla "
+            "bezrobotnych, świadczenie przedemerytalne, rodzicielskie świadczenie "
+            "uzupełniające, nauczycielskie świadczenie kompensacyjne, urlop dla "
+            "poratowania zdrowia)",
+            "ustawa zasiłkowa art. 2a (wyłączenie prawa z powodu zadłużenia składkowego)",
+        ],
+        required_documents=[
+            {
+                "code": "wniosek_swiadczenie_rehabilitacyjne",
+                "name": "Wniosek o świadczenie rehabilitacyjne",
+                "when": "przed upływem okresu pobierania zasiłku chorobowego",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_lekarza_orzecznika",
+                "name": (
+                    "Orzeczenie lekarza orzecznika ZUS o rokowaniu odzyskania zdolności "
+                    "do pracy"
+                ),
+                "when": "wraz z wnioskiem",
                 "applies_to": None,
             },
             {
