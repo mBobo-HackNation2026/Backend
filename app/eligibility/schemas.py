@@ -39,6 +39,16 @@ class MaternityLeaveEligibilityRequest(BaseModel):
             "o ile wystąpił."
         ),
     )
+    other_employment_secured: bool | None = Field(
+        default=None,
+        description=(
+            "Dotyczy wyłącznie 'zasiłku w wysokości zasiłku macierzyńskiego' (ustawa "
+            "zasiłkowa art. 30 ust. 3, employment_ended_reason="
+            "upadlosc_likwidacja_smierc_pracodawcy): czy po ustaniu poprzedniego "
+            "zatrudnienia zapewniono wnioskodawczyni inne zatrudnienie. "
+            "None = nieznane."
+        ),
+    )
 
 
 class EligibilityStatus(StrEnum):

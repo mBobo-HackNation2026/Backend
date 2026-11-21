@@ -273,7 +273,28 @@ def test_plan_institution_and_deadlines_come_from_the_rule_not_a_literal() -> No
     assert result.plan.deadlines == ["Testowy termin"]
 
 
-def test_alternative_benefit_eligible_for_employer_liquidation() -> None:
+def test_alternative_benefit_eligible_when_no_other_employment_secured() -> None:
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.upadlosc_likwidacja_smierc_pracodawcy,
+        other_employment_secured=False,
+    )
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks is None
+    assert result.plan.duration_description == "do dnia porodu"
+    assert result.warnings == []
+
+
+def test_alternative_benefit_requires_verification_when_other_employment_unknown() -> None:
+    """Without other_employment_secured, the engine must not guess - this used to
+    silently return likely_eligible with a disclaimer warning; it must now hold off
+    with requires_verification and an explicit missing_data entry instead."""
     rule = _make_alternative_rule()
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
@@ -283,11 +304,25 @@ def test_alternative_benefit_eligible_for_employer_liquidation() -> None:
 
     result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
 
-    assert result.status == EligibilityStatus.likely_eligible
-    assert result.plan is not None
-    assert result.plan.weeks is None
-    assert result.plan.duration_description == "do dnia porodu"
-    assert any("innego zatrudnienia" in w for w in result.warnings)
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("inne zatrudnienie" in m for m in result.missing_data)
+    assert result.plan is None
+
+
+def test_alternative_benefit_not_eligible_when_other_employment_secured() -> None:
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.upadlosc_likwidacja_smierc_pracodawcy,
+        other_employment_secured=True,
+    )
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert any("zapewniono inne zatrudnienie" in m for m in result.unmet_conditions)
+    assert result.plan is None
 
 
 def test_alternative_benefit_not_applicable_for_unlawful_dismissal() -> None:

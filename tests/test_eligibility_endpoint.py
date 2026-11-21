@@ -56,6 +56,7 @@ def test_check_eligibility_alternative_benefit_for_employer_liquidation(
             "children_count": 1,
             "insured_at_birth": False,
             "employment_ended_reason": "upadlosc_likwidacja_smierc_pracodawcy",
+            "other_employment_secured": False,
         },
     )
 
@@ -65,3 +66,24 @@ def test_check_eligibility_alternative_benefit_for_employer_liquidation(
     assert body["plan"]["weeks"] is None
     assert body["plan"]["duration_description"] == "do dnia porodu"
     assert body["benefit_code"] == ALTERNATIVE_BENEFIT_CODE
+
+
+def test_check_eligibility_alternative_benefit_requires_verification_without_employment_field(
+    client: TestClient,
+) -> None:
+    """Without other_employment_secured, the API must not guess likely_eligible - it
+    must ask for that missing fact explicitly instead."""
+    response = client.post(
+        f"/api/v1/eligibility/check/{ALTERNATIVE_BENEFIT_CODE}",
+        json={
+            "children_count": 1,
+            "insured_at_birth": False,
+            "employment_ended_reason": "upadlosc_likwidacja_smierc_pracodawcy",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "requires_verification"
+    assert body["plan"] is None
+    assert any("inne zatrudnienie" in m for m in body["missing_data"])

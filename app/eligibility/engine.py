@@ -289,17 +289,30 @@ def evaluate_alternative_maternity_benefit_eligibility(
             "ubezpieczenie ustało w okresie ciąży wskutek śmierci, upadłości lub likwidacji "
             "pracodawcy (ustawa zasiłkowa art. 30 ust. 3)"
         )
-        warnings.append(
-            "Świadczenie przysługuje dodatkowo tylko, gdy nie zapewniono innego zatrudnienia "
-            "(ustawa zasiłkowa art. 30 ust. 3) - ta ocena nie weryfikuje tego warunku."
-        )
+        if request.other_employment_secured is None:
+            missing_data.append(
+                "informacja, czy zapewniono inne zatrudnienie po ustaniu poprzedniego "
+                "(ustawa zasiłkowa art. 30 ust. 3)"
+            )
+        elif request.other_employment_secured:
+            unmet_conditions.append(
+                "zapewniono inne zatrudnienie po ustaniu poprzedniego - świadczenie "
+                "przysługuje tylko, gdy nie zapewniono innego zatrudnienia (ustawa "
+                "zasiłkowa art. 30 ust. 3)"
+            )
+        else:
+            met_conditions.append(
+                "nie zapewniono innego zatrudnienia po ustaniu poprzedniego (ustawa "
+                "zasiłkowa art. 30 ust. 3)"
+            )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
 
-    # Unlike the standard evaluator, missing_data alone (unknown insured_at_birth or
-    # unknown employment_ended_reason) must NOT surface a plan here: both are the core
-    # trigger conditions for this benefit (there's no independent condition left to
-    # confirm), so only a confirmed likely_eligible result warrants a plan.
+    # Unlike the standard evaluator, missing_data alone must NOT surface a plan here:
+    # every missing fact checked above (insured_at_birth, employment_ended_reason,
+    # other_employment_secured) is itself a trigger condition for this benefit, not an
+    # independent/orthogonal field - so only a confirmed likely_eligible result (every
+    # condition checked and satisfied) warrants a plan.
     plan = _build_plan(rule, request) if status == EligibilityStatus.likely_eligible else None
 
     return EligibilityResult(
