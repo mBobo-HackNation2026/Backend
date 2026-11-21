@@ -106,3 +106,35 @@ def test_allows_non_current_versions_alongside_one_current() -> None:
     finally:
         db.rollback()
         db.close()
+
+
+def test_new_columns_have_safe_defaults_when_not_specified() -> None:
+    db = SessionLocal()
+    try:
+        benefit_type = BenefitType(code="test_benefit_type_defaults", name="Test")
+        db.add(benefit_type)
+        db.flush()
+
+        rule = BenefitRuleVersion(
+            benefit_type_id=benefit_type.id,
+            version=1,
+            is_current=True,
+            effective_from=date(2026, 1, 1),
+            rate_percentage=Decimal("100.00"),
+            weeks_by_child_count=None,
+            debt_threshold_percent_of_min_wage=Decimal("1.00"),
+            min_wage_reference_zl=Decimal("4806.00"),
+            legal_basis=["test"],
+            required_documents=[],
+        )
+        db.add(rule)
+        db.flush()
+
+        fetched = db.query(BenefitRuleVersion).filter_by(benefit_type_id=benefit_type.id).one()
+        assert fetched.weeks_by_child_count is None
+        assert fetched.duration_until_birth is False
+        assert fetched.institution == "ZUS"
+        assert fetched.deadlines == []
+    finally:
+        db.rollback()
+        db.close()
