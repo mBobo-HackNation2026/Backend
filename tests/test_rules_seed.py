@@ -2,7 +2,12 @@ from decimal import Decimal
 
 from app.db.models.benefit_rule import BenefitRuleVersion, BenefitType
 from app.db.session import SessionLocal
-from app.rules.seed import ALTERNATIVE_BENEFIT_CODE, MATERNITY_LEAVE_BENEFIT_CODE, ensure_seeded
+from app.rules.seed import (
+    ALTERNATIVE_BENEFIT_CODE,
+    MATERNITY_LEAVE_BENEFIT_CODE,
+    PATERNITY_LEAVE_BENEFIT_CODE,
+    ensure_seeded,
+)
 
 
 def test_ensure_seeded_creates_exactly_one_current_rule() -> None:
@@ -96,5 +101,28 @@ def test_ensure_seeded_creates_alternative_benefit_rule() -> None:
         doc_codes = {doc["code"] for doc in rule.required_documents}
         assert "zaswiadczenie_z3" not in doc_codes
         assert "zaswiadczenie_z3a" not in doc_codes
+    finally:
+        db.close()
+
+
+def test_ensure_seeded_creates_paternity_leave_rule() -> None:
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+        ensure_seeded(db)  # must be idempotent
+
+        rule = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == PATERNITY_LEAVE_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
+            )
+            .one()
+        )
+
+        assert rule.rate_percentage == Decimal("100.00")
+        assert rule.weeks_by_child_count == {"1": 2, "2": 2, "3": 2, "4": 2, "5+": 2}
+        assert rule.duration_until_birth is False
     finally:
         db.close()

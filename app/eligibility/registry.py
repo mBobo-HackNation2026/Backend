@@ -13,8 +13,10 @@ from app.db.models.benefit_rule import BenefitRuleVersion
 from app.eligibility.engine import (
     ALTERNATIVE_BENEFIT_CODE,
     BENEFIT_CODE,
+    PATERNITY_LEAVE_BENEFIT_CODE,
     evaluate_alternative_maternity_benefit_eligibility,
     evaluate_maternity_leave_eligibility,
+    evaluate_paternity_leave_eligibility,
 )
 from app.eligibility.schemas import EligibilityResult, MaternityLeaveEligibilityRequest
 
@@ -25,4 +27,5 @@ EligibilityEvaluator = Callable[
 ELIGIBILITY_EVALUATORS: dict[str, EligibilityEvaluator] = {
     BENEFIT_CODE: evaluate_maternity_leave_eligibility,
     ALTERNATIVE_BENEFIT_CODE: evaluate_alternative_maternity_benefit_eligibility,
+    PATERNITY_LEAVE_BENEFIT_CODE: evaluate_paternity_leave_eligibility,
 }

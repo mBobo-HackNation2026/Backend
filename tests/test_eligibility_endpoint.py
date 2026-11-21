@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 MATERNITY_LEAVE_CODE = "zasilek_macierzynski_urlop_macierzynski"
 ALTERNATIVE_BENEFIT_CODE = "zasilek_w_wysokosci_zasilku_macierzynskiego"
+PATERNITY_LEAVE_CODE = "urlop_ojcowski"
 
 
 def test_check_eligibility_returns_likely_eligible_for_insured_mother(client: TestClient) -> None:
@@ -87,3 +88,30 @@ def test_check_eligibility_alternative_benefit_requires_verification_without_emp
     assert body["status"] == "requires_verification"
     assert body["plan"] is None
     assert any("inne zatrudnienie" in m for m in body["missing_data"])
+
+
+def test_check_eligibility_paternity_leave_likely_eligible(client: TestClient) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{PATERNITY_LEAVE_CODE}",
+        json={"children_count": 1, "father_insured": True, "child_age_months": 2},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert body["plan"]["weeks"] == 2
+    assert body["benefit_code"] == PATERNITY_LEAVE_CODE
+
+
+def test_check_eligibility_paternity_leave_not_eligible_after_deadline(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{PATERNITY_LEAVE_CODE}",
+        json={"children_count": 1, "father_insured": True, "child_age_months": 14},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_eligible"
+    assert body["plan"] is None

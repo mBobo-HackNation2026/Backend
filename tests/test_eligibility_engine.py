@@ -7,6 +7,7 @@ from app.eligibility.engine import (
     BENEFIT_CODE,
     evaluate_alternative_maternity_benefit_eligibility,
     evaluate_maternity_leave_eligibility,
+    evaluate_paternity_leave_eligibility,
 )
 from app.eligibility.schemas import (
     EligibilityStatus,
@@ -418,3 +419,85 @@ def test_unlawful_dismissal_solution_does_not_point_at_alternative_benefit_code(
     assert solution.related_benefit_code is None
     assert "zasiłku macierzyńskiego za okres urlopu macierzyńskiego" in solution.description
     assert ALTERNATIVE_BENEFIT_CODE not in solution.description
+
+
+def _make_paternity_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count={"1": 2, "2": 2, "3": 2, "4": 2, "5+": 2},
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="Pracodawca albo ZUS",
+        legal_basis=["Kodeks pracy (urlop ojcowski)"],
+        deadlines=["Do ukończenia przez dziecko 12. miesiąca życia"],
+        required_documents=[
+            {
+                "code": "wniosek_urlop_ojcowski",
+                "name": "Wniosek",
+                "when": "...",
+                "applies_to": None,
+            },
+        ],
+    )
+
+
+def test_paternity_leave_eligible_when_insured_and_within_deadline() -> None:
+    rule = _make_paternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1, father_insured=True, child_age_months=3
+    )
+
+    result = evaluate_paternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 2
+
+
+def test_paternity_leave_requires_verification_when_insurance_status_missing() -> None:
+    rule = _make_paternity_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, child_age_months=3)
+
+    result = evaluate_paternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("ubezpieczenia chorobowego ojca" in m for m in result.missing_data)
+    assert result.plan is None
+
+
+def test_paternity_leave_requires_verification_when_child_age_missing() -> None:
+    rule = _make_paternity_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, father_insured=True)
+
+    result = evaluate_paternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("wiek dziecka" in m for m in result.missing_data)
+    assert result.plan is None
+
+
+def test_paternity_leave_not_eligible_when_father_not_insured() -> None:
+    rule = _make_paternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1, father_insured=False, child_age_months=3
+    )
+
+    result = evaluate_paternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_paternity_leave_not_eligible_when_deadline_passed() -> None:
+    rule = _make_paternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1, father_insured=True, child_age_months=12
+    )
+
+    result = evaluate_paternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None

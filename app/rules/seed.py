@@ -15,11 +15,14 @@ ALTERNATIVE_BENEFIT_CODE = "zasilek_w_wysokosci_zasilku_macierzynskiego"
 ALTERNATIVE_BENEFIT_NAME = (
     "Zasiłek w wysokości zasiłku macierzyńskiego (po ustaniu ubezpieczenia w ciąży)"
 )
+PATERNITY_LEAVE_BENEFIT_CODE = "urlop_ojcowski"
+PATERNITY_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu ojcowskiego"
 
 
 def ensure_seeded(db: Session) -> None:
     _ensure_maternity_leave_seeded(db)
     _ensure_alternative_benefit_seeded(db)
+    _ensure_paternity_leave_seeded(db)
 
 
 def _ensure_maternity_leave_seeded(db: Session) -> None:
@@ -195,6 +198,74 @@ def _ensure_alternative_benefit_seeded(db: Session) -> None:
                     "po porodzie (niewymagany, jeśli dane pozyskiwane są z rejestru stanu "
                     "cywilnego)"
                 ),
+                "applies_to": None,
+            },
+        ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_paternity_leave_seeded(db: Session) -> None:
+    benefit_type = db.query(BenefitType).filter_by(code=PATERNITY_LEAVE_BENEFIT_CODE).one_or_none()
+    if benefit_type is None:
+        benefit_type = BenefitType(
+            code=PATERNITY_LEAVE_BENEFIT_CODE,
+            name=PATERNITY_LEAVE_BENEFIT_NAME,
+            description=(
+                "Świadczenie za okres urlopu ojcowskiego - 2 tygodnie, do wykorzystania "
+                "jednorazowo lub w maksymalnie dwóch częściach, nie dłużej niż do "
+                "ukończenia przez dziecko 12. miesiąca życia (Kodeks pracy)."
+            ),
+        )
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        rate_percentage=Decimal("100.00"),
+        # Urlop ojcowski is a flat 2 weeks regardless of how many children were born at
+        # once (unlike urlop macierzyński, which scales with children_count) - every key
+        # maps to the same figure.
+        weeks_by_child_count={"1": 2, "2": 2, "3": 2, "4": 2, "5+": 2},
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution=(
+            "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
+            "chorobowego) albo ZUS"
+        ),
+        legal_basis=[
+            "Kodeks pracy (urlop ojcowski - 2 tygodnie, wykorzystywane jednorazowo albo "
+            "w nie więcej niż dwóch częściach, nie krótszych niż tydzień każda)",
+            "Kodeks pracy (termin: do ukończenia przez dziecko 12. miesiąca życia)",
+        ],
+        deadlines=[
+            "Wniosek o urlop ojcowski - nie później niż do ukończenia przez dziecko 12. "
+            "miesiąca życia; po tym terminie prawo wygasa.",
+        ],
+        required_documents=[
+            {
+                "code": "wniosek_urlop_ojcowski",
+                "name": "Wniosek o udzielenie urlopu ojcowskiego",
+                "when": "przed rozpoczęciem korzystania z urlopu",
+                "applies_to": None,
+            },
+            {
+                "code": "akt_urodzenia",
+                "name": "Skrócony odpis aktu urodzenia dziecka",
+                "when": "po porodzie",
                 "applies_to": None,
             },
         ],

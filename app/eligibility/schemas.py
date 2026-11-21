@@ -17,6 +17,10 @@ class EmploymentEndedReason(StrEnum):
 
 
 class MaternityLeaveEligibilityRequest(BaseModel):
+    """Współdzielony schemat requestu dla wszystkich obecnie zaimplementowanych świadczeń
+    (zob. app/eligibility/registry.py) - każde pole dotyczy tylko tych świadczeń, których
+    ocena go faktycznie używa; pozostałe pola są dla nich po prostu ignorowane."""
+
     children_count: int = Field(ge=1, description="Liczba dzieci urodzonych przy jednym porodzie")
     insured_at_birth: bool | None = Field(
         default=None,
@@ -47,6 +51,22 @@ class MaternityLeaveEligibilityRequest(BaseModel):
             "upadlosc_likwidacja_smierc_pracodawcy): czy po ustaniu poprzedniego "
             "zatrudnienia zapewniono wnioskodawczyni inne zatrudnienie. "
             "None = nieznane."
+        ),
+    )
+    father_insured: bool | None = Field(
+        default=None,
+        description=(
+            "Dotyczy wyłącznie urlopu ojcowskiego: czy ojciec dziecka jest objęty "
+            "ubezpieczeniem chorobowym. None = nieznane."
+        ),
+    )
+    child_age_months: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Dotyczy wyłącznie urlopu ojcowskiego: wiek dziecka w pełnych miesiącach w "
+            "dniu składania wniosku. Prawo do urlopu ojcowskiego wygasa po ukończeniu "
+            "przez dziecko 12. miesiąca życia (Kodeks pracy). None = nieznane."
         ),
     )
 

@@ -21,6 +21,8 @@ from app.eligibility.schemas import (
 from app.rules.seed import (
     ALTERNATIVE_BENEFIT_CODE,
     ALTERNATIVE_BENEFIT_NAME,
+    PATERNITY_LEAVE_BENEFIT_CODE,
+    PATERNITY_LEAVE_BENEFIT_NAME,
 )
 from app.rules.seed import (
     MATERNITY_LEAVE_BENEFIT_CODE as BENEFIT_CODE,
@@ -326,4 +328,62 @@ def evaluate_alternative_maternity_benefit_eligibility(
         plan=plan,
         rules_version=rule.version,
         warnings=warnings,
+    )
+
+
+_PATERNITY_LEAVE_DEADLINE_MONTHS = 12
+
+
+def evaluate_paternity_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+
+    if request.father_insured is None:
+        missing_data.append("status ubezpieczenia chorobowego ojca dziecka")
+    elif request.father_insured:
+        met_conditions.append("ojciec dziecka objęty ubezpieczeniem chorobowym")
+    else:
+        unmet_conditions.append("ojciec dziecka nie jest objęty ubezpieczeniem chorobowym")
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Bez ubezpieczenia chorobowego ojcu nie przysługuje urlop ojcowski. "
+                    "Sprawdź, czy drugi rodzic ma niezależne uprawnienia (np. urlop "
+                    "rodzicielski)."
+                ),
+            )
+        )
+
+    if request.child_age_months is None:
+        missing_data.append("wiek dziecka w miesiącach")
+    elif request.child_age_months >= _PATERNITY_LEAVE_DEADLINE_MONTHS:
+        unmet_conditions.append(
+            f"dziecko ukończyło {_PATERNITY_LEAVE_DEADLINE_MONTHS}. miesiąc życia - prawo "
+            "do urlopu ojcowskiego wygasło (Kodeks pracy)"
+        )
+    else:
+        met_conditions.append(
+            f"dziecko nie ukończyło jeszcze {_PATERNITY_LEAVE_DEADLINE_MONTHS}. miesiąca "
+            "życia - termin na skorzystanie z urlopu ojcowskiego nie minął"
+        )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+    plan = _build_plan(rule, request) if status == EligibilityStatus.likely_eligible else None
+
+    return EligibilityResult(
+        benefit_code=PATERNITY_LEAVE_BENEFIT_CODE,
+        benefit_name=PATERNITY_LEAVE_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=[],
     )
