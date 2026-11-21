@@ -121,6 +121,7 @@ def evaluate_maternity_leave_eligibility(
                         "innego zatrudnienia."
                     ),
                     legal_basis="ustawa zasiłkowa art. 30 ust. 1 pkt 1 i ust. 3",
+                    related_benefit_code=ALTERNATIVE_BENEFIT_CODE,
                 )
             )
         elif (
@@ -131,9 +132,11 @@ def evaluate_maternity_leave_eligibility(
                 PossibleSolution(
                     type=SolutionType.alternative_benefit,
                     description=(
-                        "Zasiłek w wysokości zasiłku macierzyńskiego - przysługuje, gdy "
-                        "rozwiązanie umowy w okresie ciąży naruszało przepisy prawa, co zostało "
-                        "potwierdzone prawomocnym wyrokiem sądu."
+                        "Rozwiązanie umowy w okresie ciąży z naruszeniem przepisów prawa, "
+                        "stwierdzone prawomocnym orzeczeniem sądu, uprawnia do zwykłego "
+                        "zasiłku macierzyńskiego za okres urlopu macierzyńskiego pomimo "
+                        "ustania ubezpieczenia - to jest to samo świadczenie; sprawdź je "
+                        "ponownie z potwierdzeniem tej okoliczności."
                     ),
                     legal_basis="ustawa zasiłkowa art. 30 ust. 1 pkt 2",
                 )

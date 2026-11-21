@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from app.db.models.benefit_rule import BenefitRuleVersion
 from app.eligibility.engine import (
+    ALTERNATIVE_BENEFIT_CODE,
     BENEFIT_CODE,
     evaluate_alternative_maternity_benefit_eligibility,
     evaluate_maternity_leave_eligibility,
@@ -345,3 +346,40 @@ def test_alternative_benefit_points_back_to_standard_benefit_when_still_insured(
         s.related_benefit_code == BENEFIT_CODE and s.type == SolutionType.alternative_benefit
         for s in result.possible_solutions
     )
+
+
+def test_employer_liquidation_solution_points_at_alternative_benefit_code() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.upadlosc_likwidacja_smierc_pracodawcy,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    solution = next(
+        s for s in result.possible_solutions if s.type == SolutionType.alternative_benefit
+    )
+    assert solution.related_benefit_code == ALTERNATIVE_BENEFIT_CODE
+
+
+def test_unlawful_dismissal_solution_does_not_point_at_alternative_benefit_code() -> None:
+    """art. 30 ust. 1 pkt 2 (unlawful dismissal) grants the standard benefit itself, not the
+    separate "do dnia porodu" benefit - its solution must not link to that other benefit's
+    code, and must no longer claim that other benefit is what applies."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    solution = next(
+        s for s in result.possible_solutions if s.type == SolutionType.alternative_benefit
+    )
+    assert solution.related_benefit_code is None
+    assert "zasiłku macierzyńskiego za okres urlopu macierzyńskiego" in solution.description
+    assert ALTERNATIVE_BENEFIT_CODE not in solution.description
