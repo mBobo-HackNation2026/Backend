@@ -1434,3 +1434,21 @@ git commit -m "Document the generalized eligibility endpoint and alternative ben
   `rule` argument.
 - [ ] The breaking URL change (`/check` -> `/check/{benefit_code}`) is called out explicitly in the
   final commit/README, not buried as an incidental diff.
+
+## Known limitations (carried forward, not fixed by this plan)
+
+- **`naruszenie_prawa_wyrokiem_sadu` status classification in `evaluate_maternity_leave_eligibility`
+  (Task 6).** Art. 30 ust. 1 pkt 2 arguably means the standard benefit's condition IS met via this
+  alternative legal basis (not merely "unmet, with an alternative solution"), since ust. 1 explicitly
+  says the standard zasiłek macierzyński "przysługuje również" (still applies) for this reason. Today
+  this still lands in `unmet_conditions` + a `SolutionType.alternative_benefit` entry whose `type`
+  value is itself slightly misleading now that its description says "to jest to samo świadczenie"
+  (the same benefit, not an alternative one) - flagged by Task 6's code quality review. Reclassifying
+  this correctly would mean: (a) moving this branch to `met_conditions` instead of
+  `unmet_conditions`/a solution entry, and (b) reconsidering whether `SolutionType` needs a value
+  other than `alternative_benefit` for "this same benefit, via a less common legal basis, needs
+  separate confirmation." This is a genuine redesign of `evaluate_maternity_leave_eligibility`'s
+  status-decision logic (not just its `PossibleSolution` text) and was deliberately deferred to a
+  future task rather than rushed into this one, per an explicit user decision made while executing
+  this plan (chose "minimal fix now" over "full correction now" when this was first discovered during
+  Task 4's review).

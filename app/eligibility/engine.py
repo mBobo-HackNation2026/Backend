@@ -128,6 +128,15 @@ def evaluate_maternity_leave_eligibility(
             request.employment_ended_reason
             == EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu
         ):
+            # Unlike the branch above, this reason has no related_benefit_code: art. 30
+            # ust. 1 pkt 2 grants THIS SAME benefit (not the separate "do dnia porodu"
+            # benefit under ust. 3, which explicitly only lists death/upadłość/likwidacja -
+            # see evaluate_alternative_maternity_benefit_eligibility for that boundary).
+            # KNOWN LIMITATION (deliberately deferred, not fixed by this branch): since art.
+            # 30 ust. 1 pkt 2 arguably means the standard condition IS met via this
+            # alternative legal basis, this should plausibly land in met_conditions rather
+            # than unmet_conditions/SolutionType.alternative_benefit - that reclassification
+            # is a separate future task, tracked in this plan's self-review checklist.
             solutions.append(
                 PossibleSolution(
                     type=SolutionType.alternative_benefit,
