@@ -46,6 +46,14 @@ def ensure_seeded(db: Session) -> None:
         weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
         debt_threshold_percent_of_min_wage=Decimal("1.00"),
         min_wage_reference_zl=Decimal("4806.00"),
+        institution=(
+            "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
+            "chorobowego) albo ZUS"
+        ),
+        deadlines=[
+            "Wniosek o urlop macierzyński - przed rozpoczęciem korzystania z urlopu (lub "
+            "łącznie z wnioskiem o urlop rodzicielski)",
+        ],
         legal_basis=[
             "Kodeks pracy art. 180 §1 (wymiar urlopu macierzyńskiego wg liczby dzieci)",
             "ustawa zasiłkowa art. 29 ust. 1 pkt 1 (prawo do zasiłku macierzyńskiego)",

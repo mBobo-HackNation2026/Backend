@@ -47,3 +47,25 @@ def test_seeded_rule_has_z3_for_standard_and_none_for_self_employed() -> None:
         assert "zaswiadczenie_z3a" not in docs_by_code
     finally:
         db.close()
+
+
+def test_seeded_maternity_leave_rule_has_institution_and_deadlines() -> None:
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+
+        rule = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == MATERNITY_LEAVE_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
+            )
+            .one()
+        )
+
+        assert "Pracodawca" in rule.institution
+        assert rule.deadlines
+        assert rule.duration_until_birth is False
+    finally:
+        db.close()
