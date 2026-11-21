@@ -54,6 +54,13 @@ def ensure_seeded(db: Session) -> None:
             "ubezpieczenia w ciąży)",
             "ustawa zasiłkowa art. 2a (wyłączenie prawa z powodu zadłużenia składkowego)",
         ],
+        # "applies_to" is an internal seed-data-only tag consumed by the eligibility
+        # engine to pick the right document set given request.insurance_title; it is
+        # never exposed on the public RequiredDocument schema. None/missing = always
+        # required. "standard" = non-self-employed titles (umowa_o_prace, unknown) -
+        # the employer issues Z-3. "self_employed" = self-employed-like titles
+        # (dzialalnosc_gospodarcza) - there is no employer to issue Z-3, so Z-3a is
+        # required instead (mock/placeholder content; official text TBD).
         required_documents=[
             {
                 "code": "wniosek_urlop_macierzynski",
@@ -65,11 +72,22 @@ def ensure_seeded(db: Session) -> None:
                     "przed rozpoczęciem korzystania z urlopu, ewentualnie łącznie z wnioskiem "
                     "o urlop rodzicielski"
                 ),
+                "applies_to": None,
             },
             {
                 "code": "zaswiadczenie_z3",
                 "name": "Zaświadczenie płatnika składek Z-3",
                 "when": "gdy płatnikiem zasiłku jest ZUS, a nie pracodawca",
+                "applies_to": "standard",
+            },
+            {
+                "code": "zaswiadczenie_z3a",
+                "name": "Zaświadczenie płatnika składek Z-3a",
+                "when": (
+                    "dla osób prowadzących pozarolniczą działalność gospodarczą - brak "
+                    "pracodawcy, więc zaświadczenie wystawia się samodzielnie na formularzu Z-3a"
+                ),
+                "applies_to": "self_employed",
             },
             {
                 "code": "akt_urodzenia",
@@ -78,6 +96,7 @@ def ensure_seeded(db: Session) -> None:
                     "po porodzie (niewymagany, jeśli płatnikiem jest ZUS - dane pozyskiwane są "
                     "z rejestru stanu cywilnego)"
                 ),
+                "applies_to": None,
             },
         ],
     )
