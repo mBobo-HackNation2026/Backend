@@ -4,7 +4,7 @@ Brak zależności od bazy danych czy HTTP - funkcja przyjmuje gotową wersję re
 (``BenefitRuleVersion``) oraz dane wniosku i zwraca ustrukturyzowany wynik oceny.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from app.db.models.benefit_rule import BenefitRuleVersion
 from app.eligibility.schemas import (
@@ -49,7 +49,7 @@ def _weeks_for_children_count(weeks_by_child_count: dict, children_count: int) -
     return weeks_by_child_count[key]
 
 
-def _document_applies(doc: dict, is_self_employed: bool) -> bool:
+def _document_applies(doc: dict, is_self_employed: bool, *, za_zyciem: bool = False) -> bool:
     """Whether a seed-data required-document entry applies to this request.
 
     ``applies_to`` is an internal seed-data-only tag (never exposed on the public
@@ -57,6 +57,8 @@ def _document_applies(doc: dict, is_self_employed: bool) -> bool:
     non-self-employed titles (employer issues Z-3). Self-employed-like titles get no
     "self_employed"-tagged document today (see ``app/rules/seed.py`` for why), but the
     tag is kept generic so a future rule version can add one without an engine change.
+    "za_zyciem" (used only by urlop rodzicielski) means the document is needed only
+    when the child has a "Za życiem" certificate.
     """
     applies_to = doc.get("applies_to")
     if applies_to is None:
@@ -65,6 +67,8 @@ def _document_applies(doc: dict, is_self_employed: bool) -> bool:
         return is_self_employed
     if applies_to == "standard":
         return not is_self_employed
+    if applies_to == "za_zyciem":
+        return za_zyciem
     return True
 
 
@@ -399,14 +403,186 @@ def evaluate_paternity_leave_eligibility(
     )
 
 
+_PARENTAL_LEAVE_NON_TRANSFERABLE_WEEKS = 9
+_PARENTAL_LEAVE_FULL_DOSE_RATE_PERCENT = Decimal("81.50")
+_PARENTAL_LEAVE_MAX_PART_TIME_FRACTION = Decimal("0.5")
+
+
+def _build_parental_leave_plan(
+    rule: BenefitRuleVersion,
+    request: MaternityLeaveEligibilityRequest,
+    weeks: int,
+    rate_percentage: Decimal,
+) -> BenefitPlan:
+    is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+    za_zyciem = bool(request.za_zyciem_certificate)
+    required_documents = [
+        RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+        for doc in rule.required_documents
+        if _document_applies(doc, is_self_employed, za_zyciem=za_zyciem)
+    ]
+    return BenefitPlan(
+        weeks=weeks,
+        duration_description=None,
+        rate_percentage=rate_percentage,
+        institution=rule.institution,
+        required_documents=required_documents,
+        deadlines=list(rule.deadlines),
+        legal_basis=list(rule.legal_basis),
+    )
+
+
+def evaluate_parental_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    if request.insured_at_birth is None:
+        missing_data.append("status ubezpieczenia chorobowego wnioskującego rodzica")
+    elif request.insured_at_birth:
+        met_conditions.append(
+            "wnioskujący rodzic objęty ubezpieczeniem chorobowym (ustawa zasiłkowa "
+            "art. 29 ust. 1 pkt 1)"
+        )
+    else:
+        unmet_conditions.append("wnioskujący rodzic nie jest objęty ubezpieczeniem chorobowym")
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Bez ubezpieczenia chorobowego wnioskującemu rodzicowi nie przysługuje "
+                    "urlop rodzicielski z tego tytułu. Sprawdź uprawnienia niezależnie dla "
+                    "drugiego rodzica - to samo świadczenie, odrębne zgłoszenie."
+                ),
+            )
+        )
+
+    total_pool: int | None = None
+    if request.za_zyciem_certificate is None:
+        missing_data.append("informacja o zaświadczeniu 'Za życiem'")
+    else:
+        table = (
+            rule.weeks_by_child_count_za_zyciem
+            if request.za_zyciem_certificate
+            else rule.weeks_by_child_count
+        )
+        total_pool = _weeks_for_children_count(table, request.children_count)
+        if request.za_zyciem_certificate:
+            met_conditions.append(
+                f"zaświadczenie 'Za życiem' - wydłużony wymiar urlopu rodzicielskiego do "
+                f"{total_pool} tygodni (ustawa zasiłkowa art. 31 ust. 3)"
+            )
+
+    weeks_for_applicant: int | None = None
+    if request.other_parent_used_parental_leave_weeks is None:
+        missing_data.append(
+            "liczba tygodni urlopu rodzicielskiego już wykorzystanych przez drugiego rodzica"
+        )
+    elif total_pool is not None:
+        reserved_for_other_parent = max(
+            request.other_parent_used_parental_leave_weeks,
+            _PARENTAL_LEAVE_NON_TRANSFERABLE_WEEKS,
+        )
+        weeks_for_applicant = max(total_pool - reserved_for_other_parent, 0)
+        if weeks_for_applicant <= 0:
+            unmet_conditions.append(
+                "pula urlopu rodzicielskiego dostępna dla wnioskującego rodzica została "
+                "wyczerpana - 9 tygodni z puli jest nieprzenoszalne na rzecz drugiego "
+                "rodzica (Kodeks pracy art. 1821a)"
+            )
+        else:
+            met_conditions.append(
+                f"dostępne {weeks_for_applicant} tyg. urlopu rodzicielskiego po "
+                "uwzględnieniu nieprzenoszalnych 9 tygodni drugiego rodzica (Kodeks "
+                "pracy art. 1821a)"
+            )
+
+    rate_percentage: Decimal | None = None
+    if request.full_dose_claimed_within_21_days is None:
+        missing_data.append(
+            "informacja, czy wniosek o pełny wymiar urlopu rodzicielskiego złożono w "
+            "ciągu 21 dni po porodzie (wpływa na stawkę zasiłku)"
+        )
+    elif request.full_dose_claimed_within_21_days:
+        rate_percentage = _PARENTAL_LEAVE_FULL_DOSE_RATE_PERCENT
+        met_conditions.append(
+            "wniosek o pełny wymiar złożony w ciągu 21 dni po porodzie - stawka 81,5% "
+            "łącznie z zasiłkiem macierzyńskim (ustawa zasiłkowa art. 31 ust. 3g)"
+        )
+        warnings.append(
+            "Stawka 81,5% dotyczy łącznego rozliczenia z zasiłkiem macierzyńskim za cały "
+            "okres i nie obejmuje nieprzenoszalnych 9 tygodni drugiego rodzica, które są "
+            "zawsze płatne 70% - zweryfikuj dokładne rozliczenie z ZUS/pracodawcą."
+        )
+    else:
+        rate_percentage = rule.rate_percentage
+        met_conditions.append(
+            "stawka standardowa 70% podstawy wymiaru (ustawa zasiłkowa art. 31 ust. 3)"
+        )
+
+    part_time_fraction = request.part_time_fraction_during_parental_leave
+    if (
+        part_time_fraction is not None
+        and part_time_fraction > _PARENTAL_LEAVE_MAX_PART_TIME_FRACTION
+    ):
+        part_time_fraction = _PARENTAL_LEAVE_MAX_PART_TIME_FRACTION
+        warnings.append(
+            "Łączenie urlopu rodzicielskiego z pracą jest dopuszczalne maksymalnie w "
+            "wymiarze 1/2 etatu (Kodeks pracy art. 1821f) - podana wartość została "
+            "ograniczona do tego limitu."
+        )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    plan = None
+    if (
+        is_standard_path_open
+        and weeks_for_applicant is not None
+        and rate_percentage is not None
+    ):
+        final_weeks = weeks_for_applicant
+        if part_time_fraction is not None and part_time_fraction > 0:
+            extended = Decimal(weeks_for_applicant) / (Decimal(1) - part_time_fraction)
+            final_weeks = int(extended.to_integral_value(rounding=ROUND_HALF_UP))
+            warnings.append(
+                "Liczba tygodni uwzględnia proporcjonalne wydłużenie kalendarzowe przy "
+                "łączeniu urlopu rodzicielskiego z pracą w niepełnym wymiarze (Kodeks "
+                "pracy art. 1821f) - to wyliczenie przybliżone, zweryfikuj dokładny "
+                "harmonogram z pracodawcą/ZUS."
+            )
+        plan = _build_parental_leave_plan(rule, request, final_weeks, rate_percentage)
+
+    return EligibilityResult(
+        benefit_code=PARENTAL_LEAVE_BENEFIT_CODE,
+        benefit_name=PARENTAL_LEAVE_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
+    )
+
+
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These evaluators always return the same static result regardless of input. They
-# exist so the frontend can build UI against a stable API shape before the real
-# eligibility logic is written (explicit product decision - see project memory
-# `project-ebobo-stub-benefits-debt`). Each one's `warnings` entry says so plainly;
-# `status` is deliberately always `requires_verification`, never `likely_eligible`, so a
-# stub can never falsely tell a real user they qualify for something nobody has actually
-# evaluated.
+# These four evaluators (sickness during pregnancy, supplementary maternity leave,
+# adoption/foster care leave, stillbirth funeral benefit) always return the same static
+# result regardless of input. They exist so the frontend can build UI against a stable
+# API shape before the real eligibility logic is written (explicit product decision -
+# see project memory `project-ebobo-stub-benefits-debt`). Each one's `warnings` entry
+# says so plainly; `status` is deliberately always `requires_verification`, never
+# `likely_eligible`, so a stub can never falsely tell a real user they qualify for
+# something nobody has actually evaluated. Parental leave (urlop rodzicielski) used to
+# be in this group - see evaluate_parental_leave_eligibility above for its real logic.
 def _static_placeholder_result(
     benefit_code: str, benefit_name: str, rule: BenefitRuleVersion, todo_note: str
 ) -> EligibilityResult:
@@ -452,18 +628,6 @@ def evaluate_supplementary_maternity_leave_eligibility(
         "Docelowo: 1 tydzień za każdy tydzień hospitalizacji dziecka, limit do 15. lub "
         "8. tygodnia po porodzie zależnie od okoliczności (Kodeks pracy art. 1802), 100% "
         "podstawy.",
-    )
-
-
-def evaluate_parental_leave_eligibility(
-    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
-) -> EligibilityResult:
-    return _static_placeholder_result(
-        PARENTAL_LEAVE_BENEFIT_CODE,
-        PARENTAL_LEAVE_BENEFIT_NAME,
-        rule,
-        "Docelowo: 41/43 tygodni (65/67 z 'Za życiem'), 70% podstawy albo 81,5% łącznie "
-        "z macierzyńskim pod warunkami; wymaga modelu podziału między rodzicami.",
     )
 
 

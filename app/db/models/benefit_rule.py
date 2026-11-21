@@ -75,6 +75,10 @@ class BenefitRuleVersion(Base):
 
     rate_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     weeks_by_child_count: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Dotyczy wyłącznie urlopu rodzicielskiego: wydłużony wymiar (65/67 zamiast 41/43
+    # tygodni), gdy dziecko ma zaświadczenie "Za życiem" (ustawa zasiłkowa art. 31 ust. 3).
+    # Null dla świadczeń, których to nie dotyczy.
+    weeks_by_child_count_za_zyciem: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     duration_until_birth: Mapped[bool] = mapped_column(Boolean, default=False)
     institution: Mapped[str] = mapped_column(String(200), default="ZUS")
     deadlines: Mapped[list] = mapped_column(JSON, default=list)

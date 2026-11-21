@@ -7,6 +7,7 @@ from app.eligibility.engine import (
     BENEFIT_CODE,
     evaluate_alternative_maternity_benefit_eligibility,
     evaluate_maternity_leave_eligibility,
+    evaluate_parental_leave_eligibility,
     evaluate_paternity_leave_eligibility,
 )
 from app.eligibility.schemas import (
@@ -501,3 +502,212 @@ def test_paternity_leave_not_eligible_when_deadline_passed() -> None:
 
     assert result.status == EligibilityStatus.not_eligible
     assert result.plan is None
+
+
+def _make_parental_leave_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("70.00"),
+        weeks_by_child_count={"1": 41, "2": 43, "3": 43, "4": 43, "5+": 43},
+        weeks_by_child_count_za_zyciem={"1": 65, "2": 67, "3": 67, "4": 67, "5+": 67},
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="Pracodawca albo ZUS",
+        legal_basis=["Kodeks pracy art. 1821 i nast."],
+        deadlines=["W ciągu 21 dni po porodzie dla stawki 81,5%"],
+        required_documents=[
+            {
+                "code": "wniosek_urlop_rodzicielski",
+                "name": "Wniosek",
+                "when": "...",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_za_zyciem",
+                "name": "Zaświadczenie Za życiem",
+                "when": "...",
+                "applies_to": "za_zyciem",
+            },
+        ],
+    )
+
+
+def test_parental_leave_likely_eligible_standard_rate() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 41 - 9
+    assert result.plan.rate_percentage == Decimal("70.00")
+
+
+def test_parental_leave_full_dose_within_21_days_gets_81_5_percent() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=True,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.plan.rate_percentage == Decimal("81.50")
+
+
+def test_parental_leave_za_zyciem_extends_pool_to_65_weeks() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=True,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.plan.weeks == 65 - 9
+
+
+def test_parental_leave_twins_uses_43_week_pool() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=2,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.plan.weeks == 43 - 9
+
+
+def test_parental_leave_other_parent_using_more_than_9_weeks_reduces_applicant_share() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=20,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.plan.weeks == 41 - 20
+
+
+def test_parental_leave_pool_exhausted_by_other_parent_is_not_eligible() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=41,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_parental_leave_part_time_combination_extends_weeks_proportionally() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+        part_time_fraction_during_parental_leave=Decimal("0.5"),
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    # 32 weeks at half-time stretches to double the calendar duration.
+    assert result.plan.weeks == 64
+    assert any("wydłużenie kalendarzowe" in w for w in result.warnings)
+
+
+def test_parental_leave_part_time_fraction_above_half_is_clamped() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+        part_time_fraction_during_parental_leave=Decimal("0.8"),
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.plan.weeks == 64
+    assert any("ograniczona do tego limitu" in w for w in result.warnings)
+
+
+def test_parental_leave_not_eligible_when_not_insured() -> None:
+    """Confirmed unmet (not insured) with no other missing data lands on
+    not_eligible - same convention as the other real evaluators."""
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        za_zyciem_certificate=False,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_parental_leave_requires_verification_when_za_zyciem_unknown() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=True)
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("Za życiem" in m for m in result.missing_data)
+    assert result.plan is None
+
+
+def test_parental_leave_documents_include_za_zyciem_certificate_only_when_applicable() -> None:
+    rule = _make_parental_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        za_zyciem_certificate=True,
+        other_parent_used_parental_leave_weeks=0,
+        full_dose_claimed_within_21_days=False,
+    )
+
+    result = evaluate_parental_leave_eligibility(request, rule)
+
+    codes = {doc.code for doc in result.plan.required_documents}
+    assert "zaswiadczenie_za_zyciem" in codes
+
+    request_without = request.model_copy(update={"za_zyciem_certificate": False})
+    result_without = evaluate_parental_leave_eligibility(request_without, rule)
+    codes_without = {doc.code for doc in result_without.plan.required_documents}
+    assert "zaswiadczenie_za_zyciem" not in codes_without

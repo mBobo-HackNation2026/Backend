@@ -19,15 +19,19 @@ PATERNITY_LEAVE_BENEFIT_CODE = "urlop_ojcowski"
 PATERNITY_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu ojcowskiego"
 
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These five benefit codes are registered and return a real HTTP 200 response so the
+# These four benefit codes are registered and return a real HTTP 200 response so the
 # frontend can build UI around a stable API shape, but their eligibility evaluators
 # (app/eligibility/engine.py) are placeholders: they always return the same static
 # `requires_verification` result regardless of input, with a `warnings` entry saying so
-# explicitly. REAL per-request eligibility logic for these five is tracked as outstanding
+# explicitly. REAL per-request eligibility logic for these four is tracked as outstanding
 # work - see project memory `project-ebobo-stub-benefits-debt` - and must be implemented
 # (with the usual TDD + review process) before these are anything more than a UI
 # placeholder. Do not remove the "TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA" warning without
 # actually implementing the real logic first.
+#
+# urlop_rodzicielski (parental leave) USED to be in this list but now has a real
+# evaluator and a dedicated seed function (_ensure_parental_leave_seeded below) -
+# see evaluate_parental_leave_eligibility in app/eligibility/engine.py.
 SICKNESS_DURING_PREGNANCY_BENEFIT_CODE = "zasilek_chorobowy_w_ciazy"
 SICKNESS_DURING_PREGNANCY_BENEFIT_NAME = "Zasiłek chorobowy w ciąży"
 SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE = "uzupelniajacy_urlop_macierzynski"
@@ -69,19 +73,7 @@ def ensure_seeded(db: Session) -> None:
             "(Kodeks pracy art. 1802)."
         ),
     )
-    _ensure_stub_benefit_seeded(
-        db,
-        code=PARENTAL_LEAVE_BENEFIT_CODE,
-        name=PARENTAL_LEAVE_BENEFIT_NAME,
-        description=(
-            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: 41 tyg. "
-            "(1 dziecko) / 43 tyg. (2+ dzieci), z zaświadczeniem 'Za życiem' 65/67 tyg.; "
-            "70% podstawy (albo 81,5% łącznie z macierzyńskim, jeśli wniosek złożony w "
-            "ciągu 21 dni po porodzie obejmujący pełny wymiar - z wyjątkiem "
-            "nieprzenoszalnych 9 tygodni drugiego rodzica, zawsze 70%); wymaga "
-            "weryfikacji podziału między rodzicami."
-        ),
-    )
+    _ensure_parental_leave_seeded(db)
     _ensure_stub_benefit_seeded(
         db,
         code=ADOPTION_LEAVE_BENEFIT_CODE,
@@ -348,6 +340,102 @@ def _ensure_paternity_leave_seeded(db: Session) -> None:
                 "code": "akt_urodzenia",
                 "name": "Skrócony odpis aktu urodzenia dziecka",
                 "when": "po porodzie",
+                "applies_to": None,
+            },
+        ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_parental_leave_seeded(db: Session) -> None:
+    benefit_type = db.query(BenefitType).filter_by(code=PARENTAL_LEAVE_BENEFIT_CODE).one_or_none()
+    if benefit_type is None:
+        benefit_type = BenefitType(
+            code=PARENTAL_LEAVE_BENEFIT_CODE,
+            name=PARENTAL_LEAVE_BENEFIT_NAME,
+            description=(
+                "Świadczenie za okres urlopu rodzicielskiego, przysługujące ubezpieczonemu "
+                "rodzicowi (matce lub ojcu) po wykorzystaniu urlopu macierzyńskiego. 9 "
+                "tygodni z puli jest nieprzenoszalne na rzecz drugiego rodzica. Wymiar "
+                "wydłuża się ze standardowych 41/43 do 65/67 tygodni, jeśli dziecko ma "
+                "zaświadczenie 'Za życiem'."
+            ),
+        )
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        # Standardowa stawka 70%; silnik (evaluate_parental_leave_eligibility) podnosi
+        # ją do 81,5% dynamicznie, gdy wniosek o pełny wymiar złożono w ciągu 21 dni po
+        # porodzie (ustawa zasiłkowa art. 31 ust. 3g) - to jedyny przypadek w projekcie,
+        # gdzie stawka nie jest stałą wartością z reguły.
+        rate_percentage=Decimal("70.00"),
+        weeks_by_child_count={"1": 41, "2": 43, "3": 43, "4": 43, "5+": 43},
+        weeks_by_child_count_za_zyciem={"1": 65, "2": 67, "3": 67, "4": 67, "5+": 67},
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution=(
+            "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
+            "chorobowego) albo ZUS"
+        ),
+        deadlines=[
+            "Wniosek o pełny wymiar urlopu rodzicielskiego - najpóźniej w ciągu 21 dni po "
+            "porodzie, aby uzyskać stawkę 81,5% łącznie z zasiłkiem macierzyńskim; poza "
+            "tym terminem przysługuje stawka 70%.",
+        ],
+        legal_basis=[
+            "Kodeks pracy art. 1821 i nast. (urlop rodzicielski - 41/43 tygodni, 65/67 "
+            "tygodni z zaświadczeniem 'Za życiem')",
+            "Kodeks pracy art. 1821a (9 tygodni z puli nieprzenoszalne na rzecz drugiego "
+            "rodzica)",
+            "ustawa zasiłkowa art. 31 ust. 3 (stawka 70%) oraz ust. 3g i ust. 4 (81,5% "
+            "łącznie z macierzyńskim pod warunkiem wniosku o pełny wymiar w ciągu 21 dni)",
+            "Kodeks pracy art. 1821f (łączenie urlopu rodzicielskiego z pracą w wymiarze "
+            "nie wyższym niż 1/2 etatu, proporcjonalne wydłużenie urlopu)",
+        ],
+        required_documents=[
+            {
+                "code": "wniosek_urlop_rodzicielski",
+                "name": (
+                    "Wniosek o udzielenie urlopu rodzicielskiego (do pracodawcy) albo "
+                    "wniosek ZAM (do ZUS)"
+                ),
+                "when": (
+                    "przed rozpoczęciem korzystania z urlopu, ewentualnie łącznie z "
+                    "wnioskiem o urlop macierzyński"
+                ),
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_za_zyciem",
+                "name": (
+                    "Zaświadczenie 'Za życiem' potwierdzające ciężkie i nieodwracalne "
+                    "upośledzenie albo nieuleczalną chorobę zagrażającą życiu dziecka"
+                ),
+                "when": "wraz z wnioskiem, jeśli dotyczy wydłużonego wymiaru urlopu",
+                "applies_to": "za_zyciem",
+            },
+            {
+                "code": "akt_urodzenia",
+                "name": "Skrócony odpis aktu urodzenia dziecka",
+                "when": (
+                    "po porodzie (niewymagany, jeśli płatnikiem jest ZUS - dane pozyskiwane "
+                    "są z rejestru stanu cywilnego)"
+                ),
                 "applies_to": None,
             },
         ],
