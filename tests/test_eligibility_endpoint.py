@@ -4,8 +4,8 @@ MATERNITY_LEAVE_CODE = "zasilek_macierzynski_urlop_macierzynski"
 ALTERNATIVE_BENEFIT_CODE = "zasilek_w_wysokosci_zasilku_macierzynskiego"
 PATERNITY_LEAVE_CODE = "urlop_ojcowski"
 PARENTAL_LEAVE_CODE = "urlop_rodzicielski"
+SICKNESS_DURING_PREGNANCY_CODE = "zasilek_chorobowy_w_ciazy"
 STUB_BENEFIT_CODES = [
-    "zasilek_chorobowy_w_ciazy",
     "uzupelniajacy_urlop_macierzynski",
     "urlop_na_warunkach_urlopu_macierzynskiego",
     "zasilek_pogrzebowy_martwe_urodzenie",
@@ -176,6 +176,48 @@ def test_check_eligibility_parental_leave_pool_exhausted_by_other_parent(
             "za_zyciem_certificate": False,
             "other_parent_used_parental_leave_weeks": 41,
             "full_dose_claimed_within_21_days": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_eligible"
+    assert body["plan"] is None
+
+
+def test_check_eligibility_sickness_during_pregnancy_likely_eligible(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{SICKNESS_DURING_PREGNANCY_CODE}",
+        json={
+            "children_count": 1,
+            "is_pregnant": True,
+            "insurance_title": "umowa_o_prace",
+            "insured_days_continuous": 45,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert (
+        body["plan"]["duration_description"]
+        == "do 270 dni niezdolności do pracy w okresie ciąży"
+    )
+    assert body["plan"]["rate_percentage"] == "100.00"
+
+
+def test_check_eligibility_sickness_during_pregnancy_waiting_period_not_met(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{SICKNESS_DURING_PREGNANCY_CODE}",
+        json={
+            "children_count": 1,
+            "is_pregnant": True,
+            "insurance_title": "zlecenie",
+            "insured_days_continuous": 10,
         },
     )
 

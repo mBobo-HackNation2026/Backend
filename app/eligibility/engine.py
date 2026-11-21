@@ -42,6 +42,11 @@ from app.rules.seed import (
 )
 
 _SELF_EMPLOYED_LIKE_TITLES = {InsuranceTitle.dzialalnosc_gospodarcza}
+# Broader than _SELF_EMPLOYED_LIKE_TITLES: zlecenie is "dobrowolne ubezpieczenie
+# chorobowe" for waiting-period purposes (ustawa zasiłkowa art. 4) even though it is NOT
+# subject to the art. 2a debt-threshold restriction (that one only names osoby
+# prowadzące pozarolniczą działalność i współpracujący, duchowni, marynarze).
+_VOLUNTARY_INSURANCE_TITLES = {InsuranceTitle.zlecenie, InsuranceTitle.dzialalnosc_gospodarcza}
 
 
 def _weeks_for_children_count(weeks_by_child_count: dict, children_count: int) -> int:
@@ -70,6 +75,50 @@ def _document_applies(doc: dict, is_self_employed: bool, *, za_zyciem: bool = Fa
     if applies_to == "za_zyciem":
         return za_zyciem
     return True
+
+
+def _apply_self_employed_debt_check(
+    request: MaternityLeaveEligibilityRequest,
+    rule: BenefitRuleVersion,
+    met_conditions: list[str],
+    unmet_conditions: list[str],
+    missing_data: list[str],
+    solutions: list[PossibleSolution],
+) -> None:
+    """Shared art. 2a debt-threshold check (self-employed-like titles only).
+
+    Mutates the passed-in lists in place so callers keep accumulating into the same
+    met/unmet/missing/solutions lists they already use for their other conditions.
+    """
+    if request.insurance_title not in _SELF_EMPLOYED_LIKE_TITLES:
+        return
+    if request.debt_amount_zl is None:
+        missing_data.append(
+            "informacja o zadłużeniu składkowym na dzień powstania prawa do zasiłku"
+        )
+        return
+    threshold = rule.min_wage_reference_zl * rule.debt_threshold_percent_of_min_wage / Decimal(100)
+    if request.debt_amount_zl > threshold:
+        unmet_conditions.append(
+            f"zadłużenie składkowe ({request.debt_amount_zl} zł) przekracza "
+            f"{rule.debt_threshold_percent_of_min_wage}% minimalnego wynagrodzenia "
+            f"({threshold} zł) - ustawa zasiłkowa art. 2a"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.corrective_action,
+                description=(
+                    "Spłać zadłużenie składkowe w całości - prawo do zasiłku zostanie "
+                    "przywrócone, o ile spłata nastąpi w ciągu 6 miesięcy od dnia "
+                    "powstania prawa do świadczenia."
+                ),
+                legal_basis="ustawa zasiłkowa art. 2a ust. 2",
+            )
+        )
+    else:
+        met_conditions.append(
+            "brak zadłużenia składkowego przekraczającego próg (ustawa zasiłkowa art. 2a)"
+        )
 
 
 def _decide_status(
@@ -179,36 +228,9 @@ def evaluate_maternity_leave_eligibility(
                 )
             )
 
-    if request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES:
-        if request.debt_amount_zl is None:
-            missing_data.append(
-                "informacja o zadłużeniu składkowym na dzień powstania prawa do zasiłku"
-            )
-        else:
-            threshold = (
-                rule.min_wage_reference_zl * rule.debt_threshold_percent_of_min_wage / Decimal(100)
-            )
-            if request.debt_amount_zl > threshold:
-                unmet_conditions.append(
-                    f"zadłużenie składkowe ({request.debt_amount_zl} zł) przekracza "
-                    f"{rule.debt_threshold_percent_of_min_wage}% minimalnego wynagrodzenia "
-                    f"({threshold} zł) - ustawa zasiłkowa art. 2a"
-                )
-                solutions.append(
-                    PossibleSolution(
-                        type=SolutionType.corrective_action,
-                        description=(
-                            "Spłać zadłużenie składkowe w całości - prawo do zasiłku zostanie "
-                            "przywrócone, o ile spłata nastąpi w ciągu 6 miesięcy od dnia "
-                            "powstania prawa do świadczenia."
-                        ),
-                        legal_basis="ustawa zasiłkowa art. 2a ust. 2",
-                    )
-                )
-            else:
-                met_conditions.append(
-                    "brak zadłużenia składkowego przekraczającego próg (ustawa zasiłkowa art. 2a)"
-                )
+    _apply_self_employed_debt_check(
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+    )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
 
@@ -573,16 +595,152 @@ def evaluate_parental_leave_eligibility(
     )
 
 
+_SICKNESS_PREGNANCY_WAITING_DAYS_MANDATORY = 30
+_SICKNESS_PREGNANCY_WAITING_DAYS_VOLUNTARY = 90
+_SICKNESS_PREGNANCY_MAX_DURATION_DESCRIPTION = (
+    "do 270 dni niezdolności do pracy w okresie ciąży"
+)
+
+
+def _build_sickness_during_pregnancy_plan(
+    rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest
+) -> BenefitPlan:
+    is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+    required_documents = [
+        RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+        for doc in rule.required_documents
+        if _document_applies(doc, is_self_employed)
+    ]
+    return BenefitPlan(
+        weeks=None,
+        duration_description=_SICKNESS_PREGNANCY_MAX_DURATION_DESCRIPTION,
+        rate_percentage=rule.rate_percentage,
+        institution=rule.institution,
+        required_documents=required_documents,
+        deadlines=list(rule.deadlines),
+        legal_basis=list(rule.legal_basis),
+    )
+
+
+def evaluate_sickness_benefit_during_pregnancy_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    if request.is_pregnant is None:
+        missing_data.append("status ciąży w okresie niezdolności do pracy")
+    elif request.is_pregnant:
+        met_conditions.append(
+            "niezdolność do pracy powstała w okresie ciąży - stawka 100% i okres do 270 "
+            "dni (ustawa zasiłkowa art. 8 ust. 1)"
+        )
+    else:
+        unmet_conditions.append(
+            "niezdolność do pracy nie powstała w okresie ciąży - ta podwyższona ścieżka "
+            "(100%, do 270 dni) nie ma zastosowania"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Bez ciąży nie przysługuje ta podwyższona ścieżka zasiłku "
+                    "chorobowego (100% podstawy, do 270 dni) - może nadal przysługiwać "
+                    "zwykły zasiłek chorobowy (80% albo 100% w szczególnych przypadkach, "
+                    "do 182 dni), który nie jest jeszcze osobno modelowany w tym "
+                    "silniku."
+                ),
+            )
+        )
+
+    required_waiting_days: int | None = None
+    if request.insurance_title is None:
+        missing_data.append(
+            "tytuł ubezpieczenia (potrzebny do ustalenia okresu wyczekiwania - 30 dni "
+            "przy ubezpieczeniu obowiązkowym, 90 dni przy dobrowolnym)"
+        )
+    else:
+        required_waiting_days = (
+            _SICKNESS_PREGNANCY_WAITING_DAYS_VOLUNTARY
+            if request.insurance_title in _VOLUNTARY_INSURANCE_TITLES
+            else _SICKNESS_PREGNANCY_WAITING_DAYS_MANDATORY
+        )
+
+    if request.insured_days_continuous is None:
+        missing_data.append("liczba dni nieprzerwanego ubezpieczenia chorobowego")
+    elif required_waiting_days is not None:
+        if request.insured_days_continuous >= required_waiting_days:
+            met_conditions.append(
+                f"okres wyczekiwania ({required_waiting_days} dni) spełniony - "
+                f"{request.insured_days_continuous} dni nieprzerwanego ubezpieczenia "
+                "(ustawa zasiłkowa art. 4)"
+            )
+        else:
+            unmet_conditions.append(
+                f"okres wyczekiwania nie został jeszcze spełniony - wymagane "
+                f"{required_waiting_days} dni nieprzerwanego ubezpieczenia, podano "
+                f"{request.insured_days_continuous} (ustawa zasiłkowa art. 4)"
+            )
+            solutions.append(
+                PossibleSolution(
+                    type=SolutionType.corrective_action,
+                    description=(
+                        "Poczekaj do upływu wymaganego okresu wyczekiwania. Sprawdź też, "
+                        "czy nie dotyczy jeden z wyjątków znoszących okres wyczekiwania "
+                        "(np. absolwenci w ciągu 90 dni od ukończenia szkoły, wypadek w "
+                        "drodze do/z pracy, wcześniejszy co najmniej 10-letni okres "
+                        "obowiązkowego ubezpieczenia) - te wyjątki nie są jeszcze "
+                        "weryfikowane automatycznie przez ten silnik."
+                    ),
+                    legal_basis="ustawa zasiłkowa art. 4",
+                )
+            )
+            warnings.append(
+                "Wyjątki znoszące okres wyczekiwania (ustawa zasiłkowa art. 4 ust. 3) nie "
+                "są jeszcze automatycznie weryfikowane - sprawdź je ręcznie, jeśli mogą "
+                "dotyczyć tego wniosku."
+            )
+
+    _apply_self_employed_debt_check(
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+    )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    plan = _build_sickness_during_pregnancy_plan(rule, request) if is_standard_path_open else None
+
+    return EligibilityResult(
+        benefit_code=SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+        benefit_name=SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
+    )
+
+
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These four evaluators (sickness during pregnancy, supplementary maternity leave,
-# adoption/foster care leave, stillbirth funeral benefit) always return the same static
-# result regardless of input. They exist so the frontend can build UI against a stable
-# API shape before the real eligibility logic is written (explicit product decision -
-# see project memory `project-ebobo-stub-benefits-debt`). Each one's `warnings` entry
-# says so plainly; `status` is deliberately always `requires_verification`, never
-# `likely_eligible`, so a stub can never falsely tell a real user they qualify for
-# something nobody has actually evaluated. Parental leave (urlop rodzicielski) used to
-# be in this group - see evaluate_parental_leave_eligibility above for its real logic.
+# These three evaluators (supplementary maternity leave, adoption/foster care leave,
+# stillbirth funeral benefit) always return the same static result regardless of input.
+# They exist so the frontend can build UI against a stable API shape before the real
+# eligibility logic is written (explicit product decision - see project memory
+# `project-ebobo-stub-benefits-debt`). Each one's `warnings` entry says so plainly;
+# `status` is deliberately always `requires_verification`, never `likely_eligible`, so a
+# stub can never falsely tell a real user they qualify for something nobody has actually
+# evaluated. Parental leave (urlop rodzicielski) and sickness benefit during pregnancy
+# (zasiłek chorobowy w ciąży) used to be in this group - see
+# evaluate_parental_leave_eligibility and evaluate_sickness_benefit_during_pregnancy_eligibility
+# above for their real logic.
 def _static_placeholder_result(
     benefit_code: str, benefit_name: str, rule: BenefitRuleVersion, todo_note: str
 ) -> EligibilityResult:
@@ -602,19 +760,6 @@ def _static_placeholder_result(
             "podanych danych i służy wyłącznie do budowy widoków frontendowych, nie do "
             f"realnej oceny uprawnień. {todo_note}"
         ],
-    )
-
-
-def evaluate_sickness_benefit_during_pregnancy_eligibility(
-    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
-) -> EligibilityResult:
-    return _static_placeholder_result(
-        SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
-        SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
-        rule,
-        "Docelowo: 100% podstawy, do 270 dni (ustawa zasiłkowa art. 8 ust. 1); wymaga "
-        "weryfikacji okresu wyczekiwania (30/90 dni zależnie od tytułu ubezpieczenia, "
-        "art. 4) i statusu ciąży.",
     )
 
 

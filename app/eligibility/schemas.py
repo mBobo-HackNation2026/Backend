@@ -88,6 +88,15 @@ class MaternityLeaveEligibilityRequest(BaseModel):
     )
 
     # --- Zasiłek chorobowy w ciąży / świadczenie rehabilitacyjne (okresy wyczekiwania) ---
+    is_pregnant: bool | None = Field(
+        default=None,
+        description=(
+            "Dotyczy wyłącznie zasiłku chorobowego w ciąży: czy niezdolność do pracy "
+            "powstała w okresie ciąży - warunkuje podwyższoną stawkę 100% (zamiast 80%) "
+            "i dłuższy maksymalny okres 270 dni (zamiast 182) (ustawa zasiłkowa art. 8 "
+            "ust. 1 i art. 11 ust. 1). None = nieznane."
+        ),
+    )
     insured_days_continuous: int | None = Field(
         default=None,
         ge=0,

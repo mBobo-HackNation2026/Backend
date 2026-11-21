@@ -9,6 +9,7 @@ from app.eligibility.engine import (
     evaluate_maternity_leave_eligibility,
     evaluate_parental_leave_eligibility,
     evaluate_paternity_leave_eligibility,
+    evaluate_sickness_benefit_during_pregnancy_eligibility,
 )
 from app.eligibility.schemas import (
     EligibilityStatus,
@@ -711,3 +712,116 @@ def test_parental_leave_documents_include_za_zyciem_certificate_only_when_applic
     result_without = evaluate_parental_leave_eligibility(request_without, rule)
     codes_without = {doc.code for doc in result_without.plan.required_documents}
     assert "zaswiadczenie_za_zyciem" not in codes_without
+
+
+def _make_sickness_during_pregnancy_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        legal_basis=["ustawa zasiłkowa art. 8 ust. 1"],
+        deadlines=["Niezwłocznie po e-ZLA"],
+        required_documents=[
+            {"code": "ezla", "name": "e-ZLA", "when": "...", "applies_to": None},
+            {"code": "z3", "name": "Z-3", "when": "...", "applies_to": "standard"},
+        ],
+    )
+
+
+def test_sickness_during_pregnancy_likely_eligible_with_enough_waiting_days() -> None:
+    rule = _make_sickness_during_pregnancy_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_pregnant=True,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        insured_days_continuous=30,
+    )
+
+    result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks is None
+    assert result.plan.duration_description == "do 270 dni niezdolności do pracy w okresie ciąży"
+    assert result.plan.rate_percentage == Decimal("100.00")
+
+
+def test_sickness_during_pregnancy_not_eligible_when_not_pregnant() -> None:
+    rule = _make_sickness_during_pregnancy_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_pregnant=False,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        insured_days_continuous=30,
+    )
+
+    result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_sickness_during_pregnancy_requires_90_days_for_zlecenie() -> None:
+    rule = _make_sickness_during_pregnancy_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_pregnant=True,
+        insurance_title=InsuranceTitle.zlecenie,
+        insured_days_continuous=45,
+    )
+
+    result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert any("90 dni" in c for c in result.unmet_conditions)
+
+
+def test_sickness_during_pregnancy_30_days_is_enough_for_umowa_o_prace() -> None:
+    rule = _make_sickness_during_pregnancy_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_pregnant=True,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        insured_days_continuous=30,
+    )
+
+    result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+
+
+def test_sickness_during_pregnancy_requires_verification_when_pregnancy_status_unknown() -> None:
+    rule = _make_sickness_during_pregnancy_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        insured_days_continuous=30,
+    )
+
+    result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("ciąży" in m for m in result.missing_data)
+    assert result.plan is not None
+
+
+def test_sickness_during_pregnancy_self_employed_debt_over_threshold_is_not_eligible() -> None:
+    rule = _make_sickness_during_pregnancy_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_pregnant=True,
+        insurance_title=InsuranceTitle.dzialalnosc_gospodarcza,
+        insured_days_continuous=90,
+        debt_amount_zl=Decimal("100.00"),
+    )
+
+    result = evaluate_sickness_benefit_during_pregnancy_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert any(s.type == SolutionType.corrective_action for s in result.possible_solutions)

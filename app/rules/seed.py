@@ -19,19 +19,20 @@ PATERNITY_LEAVE_BENEFIT_CODE = "urlop_ojcowski"
 PATERNITY_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu ojcowskiego"
 
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These four benefit codes are registered and return a real HTTP 200 response so the
+# These three benefit codes are registered and return a real HTTP 200 response so the
 # frontend can build UI around a stable API shape, but their eligibility evaluators
 # (app/eligibility/engine.py) are placeholders: they always return the same static
 # `requires_verification` result regardless of input, with a `warnings` entry saying so
-# explicitly. REAL per-request eligibility logic for these four is tracked as outstanding
+# explicitly. REAL per-request eligibility logic for these three is tracked as outstanding
 # work - see project memory `project-ebobo-stub-benefits-debt` - and must be implemented
 # (with the usual TDD + review process) before these are anything more than a UI
 # placeholder. Do not remove the "TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA" warning without
 # actually implementing the real logic first.
 #
-# urlop_rodzicielski (parental leave) USED to be in this list but now has a real
-# evaluator and a dedicated seed function (_ensure_parental_leave_seeded below) -
-# see evaluate_parental_leave_eligibility in app/eligibility/engine.py.
+# urlop_rodzicielski (parental leave) and zasilek_chorobowy_w_ciazy (sickness during
+# pregnancy) USED to be in this list but now have real evaluators and dedicated seed
+# functions (_ensure_parental_leave_seeded / _ensure_sickness_during_pregnancy_seeded
+# below) - see app/eligibility/engine.py.
 SICKNESS_DURING_PREGNANCY_BENEFIT_CODE = "zasilek_chorobowy_w_ciazy"
 SICKNESS_DURING_PREGNANCY_BENEFIT_NAME = "Zasiłek chorobowy w ciąży"
 SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE = "uzupelniajacy_urlop_macierzynski"
@@ -50,17 +51,7 @@ def ensure_seeded(db: Session) -> None:
     _ensure_maternity_leave_seeded(db)
     _ensure_alternative_benefit_seeded(db)
     _ensure_paternity_leave_seeded(db)
-    _ensure_stub_benefit_seeded(
-        db,
-        code=SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
-        name=SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
-        description=(
-            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: 100% "
-            "podstawy wymiaru, do 270 dni (ustawa zasiłkowa art. 8 ust. 1); wymaga "
-            "weryfikacji okresu wyczekiwania (30 dni - ubezpieczenie obowiązkowe / 90 dni "
-            "- dobrowolne, art. 4) oraz statusu ciąży."
-        ),
-    )
+    _ensure_sickness_during_pregnancy_seeded(db)
     _ensure_stub_benefit_seeded(
         db,
         code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
@@ -437,6 +428,79 @@ def _ensure_parental_leave_seeded(db: Session) -> None:
                     "są z rejestru stanu cywilnego)"
                 ),
                 "applies_to": None,
+            },
+        ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_sickness_during_pregnancy_seeded(db: Session) -> None:
+    benefit_type = (
+        db.query(BenefitType).filter_by(code=SICKNESS_DURING_PREGNANCY_BENEFIT_CODE).one_or_none()
+    )
+    if benefit_type is None:
+        benefit_type = BenefitType(
+            code=SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+            name=SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
+            description=(
+                "Zasiłek chorobowy przysługujący ubezpieczonej, której niezdolność do "
+                "pracy powstała w okresie ciąży - podwyższona stawka 100% podstawy "
+                "wymiaru i wydłużony maksymalny okres 270 dni (w porównaniu do zwykłego "
+                "zasiłku chorobowego: 80%, do 182 dni)."
+            ),
+        )
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        deadlines=[
+            "Wniosek o zasiłek chorobowy - niezwłocznie po otrzymaniu zaświadczenia "
+            "lekarskiego (e-ZLA). Roszczenie przedawnia się po upływie 6 miesięcy od "
+            "ostatniego dnia okresu, za który zasiłek przysługuje (ustawa zasiłkowa "
+            "art. 67 ust. 1).",
+        ],
+        legal_basis=[
+            "ustawa zasiłkowa art. 8 ust. 1 (270 dni dla niezdolności w okresie ciąży, "
+            "zamiast standardowych 182 dni)",
+            "ustawa zasiłkowa art. 11 ust. 1 (stawka 100% dla niezdolności w okresie "
+            "ciąży, zamiast standardowych 80%)",
+            "ustawa zasiłkowa art. 4 (okres wyczekiwania: 30 dni - ubezpieczenie "
+            "obowiązkowe, 90 dni - dobrowolne)",
+            "ustawa zasiłkowa art. 2a (wyłączenie prawa z powodu zadłużenia składkowego "
+            "- dotyczy osób prowadzących pozarolniczą działalność)",
+        ],
+        required_documents=[
+            {
+                "code": "zaswiadczenie_lekarskie_ezla",
+                "name": "Zaświadczenie lekarskie (e-ZLA)",
+                "when": "wystawiane elektronicznie przez lekarza, nie składane osobno",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_z3",
+                "name": "Zaświadczenie płatnika składek Z-3",
+                "when": "gdy płatnikiem zasiłku jest ZUS, a nie pracodawca",
+                "applies_to": "standard",
             },
         ],
     )
