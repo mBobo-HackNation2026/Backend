@@ -122,9 +122,13 @@ def _ensure_alternative_benefit_seeded(db: Session) -> None:
             code=ALTERNATIVE_BENEFIT_CODE,
             name=ALTERNATIVE_BENEFIT_NAME,
             description=(
-                "Świadczenie przysługujące, gdy ubezpieczenie chorobowe ustało w okresie ciąży "
-                "wskutek upadłości, likwidacji lub śmierci pracodawcy, albo rozwiązania umowy z "
-                "naruszeniem przepisów prawa stwierdzonym prawomocnym wyrokiem sądu."
+                "Świadczenie przysługujące ubezpieczonej będącej pracownicą, której umowa o "
+                "pracę wygasła wskutek śmierci pracodawcy, albo którą rozwiązano w okresie "
+                "ciąży z powodu ogłoszenia upadłości lub likwidacji pracodawcy, o ile nie "
+                "zapewniono jej innego zatrudnienia (ustawa zasiłkowa art. 30 ust. 3). Nie "
+                "obejmuje rozwiązania umowy z naruszeniem przepisów prawa stwierdzonym "
+                "prawomocnym orzeczeniem sądu - ten przypadek uprawnia wyłącznie do zwykłego "
+                "zasiłku macierzyńskiego (art. 30 ust. 1 pkt 2), nie do tego świadczenia."
             ),
         )
         db.add(benefit_type)
@@ -151,14 +155,15 @@ def _ensure_alternative_benefit_seeded(db: Session) -> None:
         min_wage_reference_zl=Decimal("4806.00"),
         institution="ZUS",
         legal_basis=[
-            "ustawa zasiłkowa art. 30 ust. 1 i ust. 3 (zasiłek w wysokości zasiłku "
-            "macierzyńskiego po ustaniu ubezpieczenia w ciąży)",
+            "ustawa zasiłkowa art. 30 ust. 3 (zasiłek w wysokości zasiłku macierzyńskiego do "
+            "dnia porodu, po ustaniu ubezpieczenia wskutek śmierci/upadłości/likwidacji "
+            "pracodawcy)",
             "ustawa zasiłkowa art. 31 ust. 1 (wysokość zasiłku - 100% podstawy wymiaru)",
         ],
         deadlines=[
-            "Wniosek ZAM - jak najszybciej po ustaniu ubezpieczenia; roszczenie o zasiłek "
-            "przedawnia się zgodnie z ustawą zasiłkową (art. 67) - sprawdź dokładny termin "
-            "indywidualnie, nie jest on podany w dostępnych materiałach źródłowych.",
+            "Wniosek ZAM - jak najszybciej po ustaniu ubezpieczenia. Roszczenie o zasiłek "
+            "przedawnia się po upływie 6 miesięcy od ostatniego dnia okresu, za który zasiłek "
+            "przysługuje (ustawa zasiłkowa art. 67 ust. 1).",
         ],
         # This benefit has no employer by definition (the employer relationship already
         # ended), so there is no "applies_to": "standard" Z-3 document here - just the
@@ -175,8 +180,10 @@ def _ensure_alternative_benefit_seeded(db: Session) -> None:
             {
                 "code": "dokument_potwierdzajacy_przyczyne_ustania_ubezpieczenia",
                 "name": (
-                    "Dokument potwierdzający przyczynę ustania ubezpieczenia (np. świadectwo "
-                    "pracy ze wskazaniem przyczyny, prawomocny wyrok sądu)"
+                    "Dokument potwierdzający przyczynę i okoliczności ustania zatrudnienia "
+                    "(np. świadectwo pracy ze wskazaniem przyczyny, dokumenty z postępowania "
+                    "upadłościowego/likwidacyjnego) oraz potwierdzenie braku innego "
+                    "zatrudnienia"
                 ),
                 "when": "wraz z wnioskiem",
                 "applies_to": None,
