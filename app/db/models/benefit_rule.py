@@ -15,10 +15,10 @@ Czas trwania świadczenia jest wyrażany na jeden z dwóch sposobów (wzajemnie 
   ``weeks_by_child_count`` jest ``None``. Silnik (``app/eligibility/engine.py``) wybiera, które pole
   wypełnić w odpowiedzi na podstawie tej flagi.
 
-``institution`` i ``deadlines`` są per-regule (nie per-silnik), ponieważ różne świadczenia mają różne
-instytucje właściwe i różne terminy - np. "zasiłek w wysokości zasiłku macierzyńskiego" jest zawsze
-wypłacany przez ZUS (nie pracodawcę), bo z definicji dotyczy sytuacji, w której stosunek pracy już
-ustał.
+``institution`` i ``deadlines`` są per-regule (nie per-silnik), ponieważ różne świadczenia mają
+różne instytucje właściwe i różne terminy - np. "zasiłek w wysokości zasiłku macierzyńskiego" jest
+zawsze wypłacany przez ZUS (nie pracodawcę), bo z definicji dotyczy sytuacji, w której stosunek
+pracy już ustał.
 """
 
 from datetime import UTC, date, datetime
