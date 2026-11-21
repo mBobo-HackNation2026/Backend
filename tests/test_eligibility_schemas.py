@@ -83,6 +83,43 @@ def test_eligibility_result_round_trips_through_json() -> None:
     assert '"data_source":"user"' in payload
 
 
+def test_benefit_plan_supports_duration_description_instead_of_weeks() -> None:
+    plan = BenefitPlan(
+        weeks=None,
+        duration_description="do dnia porodu",
+        rate_percentage=Decimal("100"),
+        institution="ZUS",
+        required_documents=[],
+        deadlines=["Niezwłocznie po ustaniu ubezpieczenia"],
+        legal_basis=["ustawa zasiłkowa art. 30"],
+    )
+
+    payload = plan.model_dump_json()
+    restored = BenefitPlan.model_validate_json(payload)
+
+    assert restored.weeks is None
+    assert restored.duration_description == "do dnia porodu"
+
+
+def test_possible_solution_supports_related_benefit_code() -> None:
+    solution = PossibleSolution(
+        type=SolutionType.alternative_benefit,
+        description="Sprawdź świadczenie X.",
+        related_benefit_code="swiadczenie_x",
+    )
+
+    assert solution.related_benefit_code == "swiadczenie_x"
+
+
+def test_possible_solution_related_benefit_code_defaults_to_none() -> None:
+    solution = PossibleSolution(
+        type=SolutionType.limitation,
+        description="Brak podstawy.",
+    )
+
+    assert solution.related_benefit_code is None
+
+
 def test_data_source_rejects_unknown_value() -> None:
     with pytest.raises(ValidationError):
         EligibilityResult.model_validate(

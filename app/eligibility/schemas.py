@@ -79,6 +79,14 @@ class PossibleSolution(BaseModel):
         default=None,
         description="Podstawa prawna rozwiązania, jeśli dotyczy.",
     )
+    related_benefit_code: str | None = Field(
+        default=None,
+        description=(
+            "Kod świadczenia, które warto sprawdzić osobno przez "
+            "POST /eligibility/check/{benefit_code}, jeśli to rozwiązanie wskazuje na inne "
+            "świadczenie niż to, którego dotyczy bieżąca ocena."
+        ),
+    )
 
 
 class RequiredDocument(BaseModel):
@@ -90,7 +98,20 @@ class RequiredDocument(BaseModel):
 
 
 class BenefitPlan(BaseModel):
-    weeks: int = Field(description="Liczba tygodni, na które przysługuje świadczenie.")
+    weeks: int | None = Field(
+        default=None,
+        description=(
+            "Liczba tygodni, na które przysługuje świadczenie. Null, gdy czas trwania nie jest "
+            "wyrażony w tygodniach - patrz duration_description."
+        ),
+    )
+    duration_description: str | None = Field(
+        default=None,
+        description=(
+            "Opis czasu trwania, gdy nie wyraża się go w tygodniach (np. 'do dnia porodu'). "
+            "Null, gdy obowiązuje weeks."
+        ),
+    )
     rate_percentage: Decimal = Field(
         description="Stawka świadczenia w procentach podstawy wymiaru."
     )

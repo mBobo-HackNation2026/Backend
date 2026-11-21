@@ -52,6 +52,41 @@ def _document_applies(doc: dict, is_self_employed: bool) -> bool:
     return True
 
 
+def _decide_status(
+    missing_data: list[str], unmet_conditions: list[str], solutions: list[PossibleSolution]
+) -> EligibilityStatus:
+    has_alternative = any(s.type == SolutionType.alternative_benefit for s in solutions)
+    if missing_data or (unmet_conditions and has_alternative):
+        return EligibilityStatus.requires_verification
+    if unmet_conditions:
+        return EligibilityStatus.not_eligible
+    return EligibilityStatus.likely_eligible
+
+
+def _build_plan(rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest) -> BenefitPlan:
+    is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+    required_documents = [
+        RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+        for doc in rule.required_documents
+        if _document_applies(doc, is_self_employed)
+    ]
+    weeks = None
+    duration_description = None
+    if rule.duration_until_birth:
+        duration_description = "do dnia porodu"
+    else:
+        weeks = _weeks_for_children_count(rule.weeks_by_child_count, request.children_count)
+    return BenefitPlan(
+        weeks=weeks,
+        duration_description=duration_description,
+        rate_percentage=rule.rate_percentage,
+        institution=rule.institution,
+        required_documents=required_documents,
+        deadlines=list(rule.deadlines),
+        legal_basis=list(rule.legal_basis),
+    )
+
+
 def evaluate_maternity_leave_eligibility(
     request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
 ) -> EligibilityResult:
@@ -143,14 +178,7 @@ def evaluate_maternity_leave_eligibility(
                     "brak zadłużenia składkowego przekraczającego próg (ustawa zasiłkowa art. 2a)"
                 )
 
-    has_alternative = any(s.type == SolutionType.alternative_benefit for s in solutions)
-
-    if missing_data or (unmet_conditions and has_alternative):
-        status = EligibilityStatus.requires_verification
-    elif unmet_conditions:
-        status = EligibilityStatus.not_eligible
-    else:
-        status = EligibilityStatus.likely_eligible
+    status = _decide_status(missing_data, unmet_conditions, solutions)
 
     warnings: list[str] = []
     if request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES:
@@ -161,7 +189,6 @@ def evaluate_maternity_leave_eligibility(
             "formularz ZAM/eZUS przed złożeniem wniosku."
         )
 
-    plan = None
     # Only populate the plan when the *standard* path is still viable: either
     # everything is confirmed (likely_eligible), or nothing has been confirmed as
     # failed yet and we're just missing data (requires_verification with no
@@ -169,33 +196,11 @@ def evaluate_maternity_leave_eligibility(
     # that lands on not_eligible, or on requires_verification because an
     # alternative path (e.g. art. 30) exists, or because unrelated missing data
     # happens to bump the status - the standard plan no longer applies and must
-    # stay None. A confirmed alternative path has no BenefitRuleVersion of its own
-    # yet, so possible_solutions is the only place it is described for now.
+    # stay None.
     is_standard_path_open = status == EligibilityStatus.likely_eligible or (
         status == EligibilityStatus.requires_verification and not unmet_conditions
     )
-    if is_standard_path_open:
-        weeks = _weeks_for_children_count(rule.weeks_by_child_count, request.children_count)
-        is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
-        required_documents = [
-            RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
-            for doc in rule.required_documents
-            if _document_applies(doc, is_self_employed)
-        ]
-        plan = BenefitPlan(
-            weeks=weeks,
-            rate_percentage=rule.rate_percentage,
-            institution=(
-                "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
-                "chorobowego) albo ZUS"
-            ),
-            required_documents=required_documents,
-            deadlines=[
-                "Wniosek o urlop macierzyński - przed rozpoczęciem korzystania z urlopu (lub "
-                "łącznie z wnioskiem o urlop rodzicielski)",
-            ],
-            legal_basis=list(rule.legal_basis),
-        )
+    plan = _build_plan(rule, request) if is_standard_path_open else None
 
     return EligibilityResult(
         benefit_code=BENEFIT_CODE,

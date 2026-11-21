@@ -21,6 +21,14 @@ def _make_rule() -> BenefitRuleVersion:
         weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
         debt_threshold_percent_of_min_wage=Decimal("1.00"),
         min_wage_reference_zl=Decimal("4806.00"),
+        institution=(
+            "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
+            "chorobowego) albo ZUS"
+        ),
+        deadlines=[
+            "Wniosek o urlop macierzyński - przed rozpoczęciem korzystania z urlopu (lub "
+            "łącznie z wnioskiem o urlop rodzicielski)",
+        ],
         legal_basis=["ustawa zasiłkowa art. 29"],
         required_documents=[
             {"code": "x", "name": "Wniosek", "when": "przed urlopem", "applies_to": None},
@@ -227,3 +235,15 @@ def test_non_self_employed_has_no_z3b_warning() -> None:
     result = evaluate_maternity_leave_eligibility(request, rule)
 
     assert result.warnings == []
+
+
+def test_plan_institution_and_deadlines_come_from_the_rule_not_a_literal() -> None:
+    rule = _make_rule()
+    rule.institution = "Testowa instytucja"
+    rule.deadlines = ["Testowy termin"]
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=True)
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.plan.institution == "Testowa instytucja"
+    assert result.plan.deadlines == ["Testowy termin"]
