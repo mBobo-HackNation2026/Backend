@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual env / uv
+.venv/
+
+# Env files
+.env
+
+# Baza danych lokalna
+*.db
+*.sqlite3
+
+# Uploady
+/uploads/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+resorces
