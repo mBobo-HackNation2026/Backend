@@ -85,9 +85,8 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     dla bezrobotnych itd. (`excluded_from_rehabilitation_benefit`). Stawka
     90% przez pierwsze 3 miesiące / 75% dalej, albo 100% w ciąży
     (`is_pregnant`); maksymalnie 12 miesięcy. Plan pokazuje stawkę startową
-    (90% albo 100%) z jawnym ostrzeżeniem, że spadek do 75% po 3 miesiącach
-    nie jest jeszcze rozbijany miesiąc po miesiącu - to zadanie przyszłego
-    kalkulatora (priorytet #3). Zob. `app/eligibility/engine.py` →
+    (90% albo 100%); pełne rozbicie 90%/75% miesiąc po miesiącu liczy teraz
+    kalkulator (zob. niżej). Zob. `app/eligibility/engine.py` →
     `evaluate_rehabilitation_benefit_eligibility`.
   - `uzupelniajacy_urlop_macierzynski` — uzupełniający urlop
     macierzyński (hospitalizacja dziecka po porodzie), 1 tydzień urlopu za
@@ -124,6 +123,49 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     którego ten silnik nie rozróżnia od martwego urodzenia. Zob.
     `app/eligibility/engine.py` →
     `evaluate_stillbirth_funeral_benefit_eligibility`.
+- **Zintegrowany kalkulator świadczeń** (`app/calculator/`) — **nowość**, priorytet
+  #3 z briefu 2026-11-21, zbudowany od razu razem z porównaniem wariantów
+  podziału (nie jako osobna, późniejsza iteracja). Celowo niezależny od
+  silnika uprawnień: liczy hipotetyczną kwotę nawet gdy ocena uprawnień
+  zwróciłaby `requires_verification`/`not_eligible` - ustalenie uprawnień i
+  wyliczenie kwoty to z założenia dwie osobne funkcje.
+  - `POST /api/v1/benefits/calculate/{benefit_code}` — dla dowolnego z 9 kodów
+    świadczeń: podstawa dzienna (÷30 z miesięcznej, ustawa zasiłkowa art. 36
+    ust. 3) × stawka% × liczba dni. Podstawa miesięczna = `average_monthly_income_zl`
+    (pracownik) albo `voluntary_contribution_base_zl` ograniczone do 23 550 zł
+    (zlecenie/działalność, art. 48), zawsze pomniejszone o 13,71% składek
+    ubezpieczonego; stosuje podstawę minimalną wyliczoną ze wzoru (4806 zł ×
+    (1-13,71%) = 4147,10 zł), gdy obliczona jest niższa - z jawnym
+    ostrzeżeniem, że to wzór, nie oficjalna tabela (żadna nie istnieje w
+    dostępnych materiałach źródłowych). Świadczenia ryczałtowe (zasiłek
+    pogrzebowy) zwracają `lump_sum_amount_zl` wprost. Świadczenia bez znanego
+    z góry okresu (zasiłek w wysokości zasiłku macierzyńskiego - "do dnia
+    porodu") zwracają samą podstawę/stawkę dzienną z ostrzeżeniem, nie
+    zgadują łącznej kwoty. Świadczenie rehabilitacyjne rozbija 360 dni na
+    90%/75% (albo płaskie 100% w ciąży) - **nie** uwzględnia jeszcze
+    kwartalnej waloryzacji podstawy (ustawa zasiłkowa art. 19 ust. 2).
+  - `POST /api/v1/benefits/compare/urlop-rodzicielski` — bierze dane dochodowe
+    obojga rodziców (`parent_a`/`parent_b`) i zwraca 3 warianty podziału puli
+    tygodni (matka maksymalnie, ojciec maksymalnie, po równo) z kwotą dla
+    każdego rodzica i sumą gospodarstwa domowego - widać np. że jeśli jeden
+    rodzic zarabia więcej, warianty dają różną łączną kwotę dla rodziny.
+    Upraszcza stawkę 81,5%/70% do jednej wartości na wariant (nie dzieli
+    wewnętrznie nieprzenoszalnych 9 tygodni każdego rodzica na osobną stawkę) -
+    sygnalizuje to przez `warnings`.
+  - **Nieużywane jeszcze pola schematu**: `employment_duration_months`,
+    `bonus_type`, `months_since_last_benefit` istnieją w requestcie, ale
+    podstawa wymiaru ich jeszcze nie uwzględnia (niuanse art. 37/38/42/43) -
+    to realny, niedokończony zakres, nie kosmetyka.
+  - **Znaleziony, jeszcze niepoprawiony błąd cytowania**: przy weryfikacji
+    stawki 81,5%/70% urlopu rodzicielskiego przeciwko treści ustawy okazało
+    się, że istniejący cytat w `evaluate_parental_leave_eligibility`/
+    `_ensure_parental_leave_seeded` ("art. 31 ust. 3g i ust. 4") jest błędny -
+    poprawne są art. 30a + art. 31 ust. 3 (stawka 81,5%) i ust. 3f (9
+    nieprzenoszalnych tygodni drugiego rodzica zawsze 70%); ust. 3g to inna,
+    niezwiązana zasada (powrót do 70% przy niewykorzystaniu ani jednego dnia
+    w pierwszym roku życia dziecka). Logika działania jest poprawna, same
+    cytaty wymagają małej poprawki - zob. pamięć projektu
+    `project-ebobo-calculator`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 
@@ -173,7 +215,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ✅ zrobione (schemat w `app/eligibility/schemas.py`, patrz "Zrobione" wyżej) |
 | 2 | Dopracowanie silnika uprawnień (urlop rodzicielski, zasiłek chorobowy w ciąży, świadczenie rehabilitacyjne - nowe świadczenie, uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, zasiłek pogrzebowy przy martwym urodzeniu) | ✅ zrobione - wszystkie 9 świadczeń mają realną logikę, patrz "Zrobione" wyżej |
 | 2a | **Jawne oznaczenie statusu implementacji** (implemented/stub) w odpowiedzi API — placeholdery dziś zwracają `HTTP 200` z ostrzeżeniem tylko w tekście; FE potrzebuje pola, które da się odczytać programistycznie | ⬜ nierozpoczęte |
-| 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ⬜ nierozpoczęte |
+| 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ✅ zrobione - kwoty per świadczenie + porównanie wariantów urlopu rodzicielskiego, patrz "Zrobione" wyżej; pola podstawy wymiaru dla zatrudnienia <12 mies./premii/przerwy między zasiłkami jeszcze nieobsłużone |
 | 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |
 | 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |
 | 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ⬜ nierozpoczęte |
