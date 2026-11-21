@@ -8,6 +8,17 @@ Konwencja wersjonowania (jedna linia na pole):
   na ``benefit_type_id`` może mieć ``is_current=True`` (wymusza indeks częściowy).
 
 Para ``(benefit_type_id, version)`` jest unikalna (wymusza ``UniqueConstraint``).
+
+Czas trwania świadczenia jest wyrażany na jeden z dwóch sposobów (wzajemnie wykluczających się):
+- ``weeks_by_child_count`` (słownik tygodni wg liczby dzieci) - typowy przypadek.
+- ``duration_until_birth=True`` - świadczenie trwa "do dnia porodu"; wtedy
+  ``weeks_by_child_count`` jest ``None``. Silnik (``app/eligibility/engine.py``) wybiera, które pole
+  wypełnić w odpowiedzi na podstawie tej flagi.
+
+``institution`` i ``deadlines`` są per-regule (nie per-silnik), ponieważ różne świadczenia mają
+różne instytucje właściwe i różne terminy - np. "zasiłek w wysokości zasiłku macierzyńskiego" jest
+zawsze wypłacany przez ZUS (nie pracodawcę), bo z definicji dotyczy sytuacji, w której stosunek
+pracy już ustał.
 """
 
 from datetime import UTC, date, datetime
@@ -63,7 +74,10 @@ class BenefitRuleVersion(Base):
     effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     rate_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    weeks_by_child_count: Mapped[dict] = mapped_column(JSON)
+    weeks_by_child_count: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    duration_until_birth: Mapped[bool] = mapped_column(Boolean, default=False)
+    institution: Mapped[str] = mapped_column(String(200), default="ZUS")
+    deadlines: Mapped[list] = mapped_column(JSON, default=list)
     debt_threshold_percent_of_min_wage: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     min_wage_reference_zl: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     legal_basis: Mapped[list] = mapped_column(JSON)

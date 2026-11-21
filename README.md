@@ -18,15 +18,22 @@ zgadywania przez AI.
 ## Status
 
 Obecnie gotowy jest szkielet aplikacji (konfiguracja, CORS, obsługa błędów,
-Swagger, `GET /api/v1/health`) oraz pierwszy silnik uprawnień:
-`POST /api/v1/eligibility/check` ocenia uprawnienie do zasiłku
-macierzyńskiego za okres urlopu macierzyńskiego i zwraca ustrukturyzowaną
-odpowiedź (status / uzasadnienie / możliwe rozwiązania / plan), zamiast
-prostego tak/nie - łącznie z wykrywaniem alternatywnej ścieżki (zasiłek w
-wysokości zasiłku macierzyńskiego) z ustawy zasiłkowej art. 30. Kolejne
-świadczenia i moduły (kalkulator, upload/analiza PDF, integracje
-ZUS/mObywatel) będą dodawane iteracyjnie w `app/services`, `app/eligibility`,
-`app/rules` i `app/api/v1/endpoints`.
+Swagger, `GET /api/v1/health`) oraz silnik uprawnień obsługujący dwa
+świadczenia przez wspólny, generyczny endpoint:
+`POST /api/v1/eligibility/check/{benefit_code}` (**uwaga: zmiana kształtu
+API względem wcześniejszej wersji** - poprzednio `POST /api/v1/eligibility/check`
+bez kodu świadczenia w URL). Obsługiwane kody: `zasilek_macierzynski_urlop_macierzynski`
+(zasiłek macierzyński za okres urlopu macierzyńskiego) i
+`zasilek_w_wysokosci_zasilku_macierzynskiego` (alternatywna ścieżka z ustawy
+zasiłkowej art. 30, dostępna gdy ubezpieczenie ustało w ciąży wskutek
+upadłości/likwidacji/śmierci pracodawcy lub niezgodnego z prawem zwolnienia
+potwierdzonego wyrokiem sądu). Każda odpowiedź ma tę samą ustrukturyzowaną
+postać (status / uzasadnienie / możliwe rozwiązania / plan) zamiast prostego
+tak/nie; `possible_solutions` może teraz wskazywać `related_benefit_code`
+innego świadczenia do sprawdzenia osobno. Kolejne świadczenia i moduły
+(kalkulator, upload/analiza PDF, integracje ZUS/mObywatel) będą dodawane
+iteracyjnie w `app/services`, `app/eligibility`, `app/rules` i
+`app/api/v1/endpoints`.
 
 ## Struktura projektu
 
