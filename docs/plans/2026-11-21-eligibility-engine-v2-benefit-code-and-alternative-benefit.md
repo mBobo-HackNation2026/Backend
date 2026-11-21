@@ -751,7 +751,14 @@ def _make_alternative_rule() -> BenefitRuleVersion:
     )
 ```
 
-Then add the test cases (one per branch):
+**Correction (made after Task 4's review cross-checked the actual source PDF):** ustawa zasiłkowa
+art. 30 ust. 3 - the legal basis for *this* benefit - only lists death/upadłość/likwidacja pracodawcy
+as triggers. It does NOT include "rozwiązanie umowy z naruszeniem przepisów prawa stwierdzonym
+prawomocnym orzeczeniem sądu" - that reason (art. 30 ust. 1 pkt 2) instead grants the *standard*
+zasiłek macierzyński (the other, already-implemented benefit), not this "do dnia porodu" one. So
+`naruszenie_prawa_wyrokiem_sadu` must NOT grant this benefit - it must be treated as not applicable
+to it, with a `possible_solution` pointing back at the standard benefit's code instead. Test the two
+reasons accordingly - one eligible, one not:
 
 ```python
 def test_alternative_benefit_eligible_for_employer_liquidation() -> None:
@@ -768,9 +775,12 @@ def test_alternative_benefit_eligible_for_employer_liquidation() -> None:
     assert result.plan is not None
     assert result.plan.weeks is None
     assert result.plan.duration_description == "do dnia porodu"
+    assert any("innego zatrudnienia" in w for w in result.warnings)
 
 
-def test_alternative_benefit_eligible_for_unlawful_dismissal() -> None:
+def test_alternative_benefit_not_applicable_for_unlawful_dismissal() -> None:
+    """art. 30 ust. 3 (this benefit) does not list unlawful-termination-by-court-ruling as a
+    trigger - only art. 30 ust. 1 pkt 2 does, which grants the *standard* benefit instead."""
     rule = _make_alternative_rule()
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
@@ -780,8 +790,12 @@ def test_alternative_benefit_eligible_for_unlawful_dismissal() -> None:
 
     result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
 
-    assert result.status == EligibilityStatus.likely_eligible
-    assert result.plan is not None
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.plan is None
+    assert any(
+        s.related_benefit_code == BENEFIT_CODE and s.type == SolutionType.alternative_benefit
+        for s in result.possible_solutions
+    )
 
 
 def test_alternative_benefit_requires_verification_when_insured_status_unknown() -> None:
@@ -852,17 +866,6 @@ from app.rules.seed import (
 )
 ```
 
-Add a module-level lookup table right after `_SELF_EMPLOYED_LIKE_TITLES`:
-
-```python
-_ALTERNATIVE_BENEFIT_LEGAL_BASIS: dict[EmploymentEndedReason, str] = {
-    EmploymentEndedReason.upadlosc_likwidacja_smierc_pracodawcy: (
-        "ustawa zasiłkowa art. 30 ust. 1 pkt 1 i ust. 3"
-    ),
-    EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu: "ustawa zasiłkowa art. 30 ust. 1 pkt 2",
-}
-```
-
 Then add the new function at the end of the file (after `evaluate_maternity_leave_eligibility`):
 
 ```python
@@ -873,6 +876,7 @@ def evaluate_alternative_maternity_benefit_eligibility(
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
     solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
 
     if request.insured_at_birth is None:
         missing_data.append("status ubezpieczenia chorobowego w dniu porodu")
@@ -895,10 +899,36 @@ def evaluate_alternative_maternity_benefit_eligibility(
         )
     elif request.employment_ended_reason is None:
         missing_data.append("powód ustania ubezpieczenia chorobowego w okresie ciąży")
+    elif request.employment_ended_reason == EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu:
+        # art. 30 ust. 3 (this benefit) only lists death/upadłość/likwidacja pracodawcy as
+        # triggers - NOT unlawful termination by court ruling. That reason instead grants the
+        # *standard* benefit under art. 30 ust. 1 pkt 2 - point there, don't grant this one.
+        unmet_conditions.append(
+            "rozwiązanie umowy z naruszeniem przepisów prawa nie jest przesłanką tego "
+            "świadczenia (ustawa zasiłkowa art. 30 ust. 3) - uprawnia wyłącznie do zwykłego "
+            "zasiłku macierzyńskiego"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.alternative_benefit,
+                description=(
+                    "Rozwiązanie umowy z naruszeniem przepisów prawa, stwierdzone "
+                    "prawomocnym orzeczeniem sądu, uprawnia do zwykłego zasiłku "
+                    "macierzyńskiego za okres urlopu macierzyńskiego (nie do tego "
+                    "świadczenia) - sprawdź to świadczenie osobno."
+                ),
+                legal_basis="ustawa zasiłkowa art. 30 ust. 1 pkt 2",
+                related_benefit_code=BENEFIT_CODE,
+            )
+        )
     else:
         met_conditions.append(
-            "ubezpieczenie ustało w okresie ciąży z przyczyny uprawniającej do świadczenia "
-            f"({_ALTERNATIVE_BENEFIT_LEGAL_BASIS[request.employment_ended_reason]})"
+            "ubezpieczenie ustało w okresie ciąży wskutek śmierci, upadłości lub likwidacji "
+            "pracodawcy (ustawa zasiłkowa art. 30 ust. 3)"
+        )
+        warnings.append(
+            "Świadczenie przysługuje dodatkowo tylko, gdy nie zapewniono innego zatrudnienia "
+            "(ustawa zasiłkowa art. 30 ust. 3) - ta ocena nie weryfikuje tego warunku."
         )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -918,7 +948,7 @@ def evaluate_alternative_maternity_benefit_eligibility(
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
-        warnings=[],
+        warnings=warnings,
     )
 ```
 
@@ -941,15 +971,29 @@ git commit -m "Add evaluate_alternative_maternity_benefit_eligibility"
 
 ---
 
-## Task 6: Point the standard benefit's art. 30 solutions at the new benefit code
+## Task 6: Point the standard benefit's art. 30 solutions at the right benefit code
+
+**Correction (made after Task 4/5's review cross-checked the actual source PDF):** the two art. 30
+branches in `evaluate_maternity_leave_eligibility` are NOT both about the same alternative benefit.
+`upadlosc_likwidacja_smierc_pracodawcy` (art. 30 ust. 3) genuinely grants the new "do dnia porodu"
+benefit added in Task 4/5 - its solution should point there. `naruszenie_prawa_wyrokiem_sadu` (art. 30
+ust. 1 pkt 2) grants the *standard* zasiłek macierzyński itself (the very benefit this function
+evaluates) despite the ended insurance - its existing description text ("Zasiłek w wysokości zasiłku
+macierzyńskiego... przysługuje, gdy rozwiązanie umowy...") is factually wrong (it names the *other*
+benefit) and must be corrected to describe the standard benefit instead; it must NOT link to
+`ALTERNATIVE_BENEFIT_CODE`, since that benefit's own evaluator (Task 5) now correctly treats this exact
+reason as not applicable to it. (Whether this branch should eventually change `evaluate_maternity_leave_eligibility`'s *own* status from `unmet_conditions` to `met_conditions` - since art. 30 ust. 1
+pkt 2 arguably means the standard condition IS met via this alternative legal basis - is a deeper
+redesign deliberately deferred to a future task; this task only fixes the factually wrong text in the
+solution it already includes, without changing the status-decision logic.)
 
 **Files:**
 - Modify: `app/eligibility/engine.py`
 - Test: `tests/test_eligibility_engine.py`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Add this to `tests/test_eligibility_engine.py`:
+Add these to `tests/test_eligibility_engine.py`:
 
 ```python
 def test_employer_liquidation_solution_points_at_alternative_benefit_code() -> None:
@@ -966,6 +1010,27 @@ def test_employer_liquidation_solution_points_at_alternative_benefit_code() -> N
         s for s in result.possible_solutions if s.type == SolutionType.alternative_benefit
     )
     assert solution.related_benefit_code == ALTERNATIVE_BENEFIT_CODE
+
+
+def test_unlawful_dismissal_solution_does_not_point_at_alternative_benefit_code() -> None:
+    """art. 30 ust. 1 pkt 2 (unlawful dismissal) grants the standard benefit itself, not the
+    separate "do dnia porodu" benefit - its solution must not link to that other benefit's
+    code, and must no longer claim that other benefit is what applies."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    solution = next(
+        s for s in result.possible_solutions if s.type == SolutionType.alternative_benefit
+    )
+    assert solution.related_benefit_code is None
+    assert "zasiłku macierzyńskiego za okres urlopu macierzyńskiego" in solution.description
+    assert ALTERNATIVE_BENEFIT_CODE not in solution.description
 ```
 
 Add `ALTERNATIVE_BENEFIT_CODE` to the file's engine import block (added in Task 5's Step 1):
@@ -979,18 +1044,20 @@ from app.eligibility.engine import (
 )
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/test_eligibility_engine.py::test_employer_liquidation_solution_points_at_alternative_benefit_code -v`
-Expected: FAIL - `solution.related_benefit_code` is currently `None` (not set in the two art. 30
-`PossibleSolution(...)` calls in `evaluate_maternity_leave_eligibility`).
+Run: `uv run pytest tests/test_eligibility_engine.py -k "alternative_benefit_code" -v`
+Expected: FAIL - the first test fails because `solution.related_benefit_code` is currently `None` (not
+set in the `upadlosc_likwidacja_smierc_pracodawcy` branch's `PossibleSolution(...)` call). The second
+test fails because the `naruszenie_prawa_wyrokiem_sadu` branch's description currently says "Zasiłek w
+wysokości zasiłku macierzyńskiego..." (the wrong benefit's name) rather than describing the standard
+benefit.
 
-- [ ] **Step 3: Add `related_benefit_code` to both art. 30 solutions**
+- [ ] **Step 3: Fix both art. 30 solutions**
 
-In `app/eligibility/engine.py`, inside `evaluate_maternity_leave_eligibility`, find the two
-`PossibleSolution(type=SolutionType.alternative_benefit, ...)` calls (the
-`upadlosc_likwidacja_smierc_pracodawcy` branch and the `naruszenie_prawa_wyrokiem_sadu` branch) and add
-`related_benefit_code=ALTERNATIVE_BENEFIT_CODE` as the last keyword argument to each:
+In `app/eligibility/engine.py`, inside `evaluate_maternity_leave_eligibility`, find the
+`upadlosc_likwidacja_smierc_pracodawcy` branch's `PossibleSolution(...)` call and add
+`related_benefit_code=ALTERNATIVE_BENEFIT_CODE` as the last keyword argument:
 
 ```python
             solutions.append(
@@ -1008,17 +1075,22 @@ In `app/eligibility/engine.py`, inside `evaluate_maternity_leave_eligibility`, f
             )
 ```
 
+Then find the `naruszenie_prawa_wyrokiem_sadu` branch's `PossibleSolution(...)` call and replace it
+entirely - its description was factually wrong (naming the other benefit) and it must not link to
+`ALTERNATIVE_BENEFIT_CODE`:
+
 ```python
             solutions.append(
                 PossibleSolution(
                     type=SolutionType.alternative_benefit,
                     description=(
-                        "Zasiłek w wysokości zasiłku macierzyńskiego - przysługuje, gdy "
-                        "rozwiązanie umowy w okresie ciąży naruszało przepisy prawa, co zostało "
-                        "potwierdzone prawomocnym wyrokiem sądu."
+                        "Rozwiązanie umowy w okresie ciąży z naruszeniem przepisów prawa, "
+                        "stwierdzone prawomocnym orzeczeniem sądu, uprawnia do zwykłego "
+                        "zasiłku macierzyńskiego za okres urlopu macierzyńskiego pomimo "
+                        "ustania ubezpieczenia - to jest to samo świadczenie; sprawdź je "
+                        "ponownie z potwierdzeniem tej okoliczności."
                     ),
                     legal_basis="ustawa zasiłkowa art. 30 ust. 1 pkt 2",
-                    related_benefit_code=ALTERNATIVE_BENEFIT_CODE,
                 )
             )
 ```
@@ -1032,7 +1104,7 @@ Expected: all PASS.
 
 ```bash
 git add app/eligibility/engine.py tests/test_eligibility_engine.py
-git commit -m "Point art. 30 solutions at the alternative benefit's code"
+git commit -m "Point each art. 30 solution at its actual applicable benefit"
 ```
 
 ---
