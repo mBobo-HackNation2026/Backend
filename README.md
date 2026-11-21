@@ -18,21 +18,29 @@ zgadywania przez AI.
 ## Status
 
 Obecnie gotowy jest szkielet aplikacji (konfiguracja, CORS, obsługa błędów,
-Swagger, `GET /api/v1/health`) oraz silnik uprawnień obsługujący dwa
-świadczenia przez wspólny, generyczny endpoint:
-`POST /api/v1/eligibility/check/{benefit_code}` (**uwaga: zmiana kształtu
-API względem wcześniejszej wersji** - poprzednio `POST /api/v1/eligibility/check`
-bez kodu świadczenia w URL). Obsługiwane kody: `zasilek_macierzynski_urlop_macierzynski`
-(zasiłek macierzyński za okres urlopu macierzyńskiego) i
-`zasilek_w_wysokosci_zasilku_macierzynskiego` (alternatywna ścieżka z ustawy
-zasiłkowej art. 30, dostępna gdy ubezpieczenie ustało w ciąży wskutek
-upadłości/likwidacji/śmierci pracodawcy lub niezgodnego z prawem zwolnienia
-potwierdzonego wyrokiem sądu). Każda odpowiedź ma tę samą ustrukturyzowaną
-postać (status / uzasadnienie / możliwe rozwiązania / plan) zamiast prostego
-tak/nie; `possible_solutions` może teraz wskazywać `related_benefit_code`
-innego świadczenia do sprawdzenia osobno. Kolejne świadczenia i moduły
-(kalkulator, upload/analiza PDF, integracje ZUS/mObywatel) będą dodawane
-iteracyjnie w `app/services`, `app/eligibility`, `app/rules` i
+Swagger, `GET /api/v1/health`), autoryzacja (sesja anonimowa, symulowane logowanie
+mObywatel, `POST /auth/refresh`, `POST /auth/logout`) oraz silnik uprawnień
+dostępny przez wspólny, generyczny endpoint `POST /api/v1/eligibility/check/{benefit_code}`.
+
+**W pełni zaimplementowane** (realna logika oceny): `zasilek_macierzynski_urlop_macierzynski`
+(zasiłek macierzyński za okres urlopu macierzyńskiego), `zasilek_w_wysokosci_zasilku_macierzynskiego`
+(alternatywna ścieżka z ustawy zasiłkowej art. 30, dostępna gdy ubezpieczenie ustało w
+ciąży wskutek upadłości/likwidacji/śmierci pracodawcy lub niezgodnego z prawem zwolnienia
+potwierdzonego wyrokiem sądu), `urlop_ojcowski` (2 tygodnie, 100% podstawy, do 12. miesiąca
+życia dziecka). Każda odpowiedź ma tę samą ustrukturyzowaną postać (status / uzasadnienie /
+możliwe rozwiązania / plan) zamiast prostego tak/nie; `possible_solutions` może wskazywać
+`related_benefit_code` innego świadczenia do sprawdzenia osobno.
+
+**Tymczasowe placeholdery** (zarejestrowane i odpowiadają `200 OK`, ale bez realnej
+logiki oceny - zawsze zwracają `status: requires_verification` z jawnym ostrzeżeniem w
+`warnings`, nigdy fałszywe `likely_eligible`; szczegóły w `app/eligibility/engine.py` i
+pamięci projektu `project-ebobo-stub-benefits-debt`): `zasilek_chorobowy_w_ciazy`,
+`uzupelniajacy_urlop_macierzynski`, `urlop_rodzicielski`,
+`urlop_na_warunkach_urlopu_macierzynskiego`, `zasilek_pogrzebowy_martwe_urodzenie`.
+Te pięć świadczeń czeka na docelową implementację logiki oceny.
+
+Kolejne moduły (kalkulator, upload/analiza PDF, integracje ZUS/mObywatel) będą
+dodawane iteracyjnie w `app/services`, `app/eligibility`, `app/rules` i
 `app/api/v1/endpoints`.
 
 ## Struktura projektu

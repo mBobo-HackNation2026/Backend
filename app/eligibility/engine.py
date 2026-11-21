@@ -19,10 +19,20 @@ from app.eligibility.schemas import (
     SolutionType,
 )
 from app.rules.seed import (
+    ADOPTION_LEAVE_BENEFIT_CODE,
+    ADOPTION_LEAVE_BENEFIT_NAME,
     ALTERNATIVE_BENEFIT_CODE,
     ALTERNATIVE_BENEFIT_NAME,
+    PARENTAL_LEAVE_BENEFIT_CODE,
+    PARENTAL_LEAVE_BENEFIT_NAME,
     PATERNITY_LEAVE_BENEFIT_CODE,
     PATERNITY_LEAVE_BENEFIT_NAME,
+    SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+    SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
+    STILLBIRTH_FUNERAL_BENEFIT_CODE,
+    STILLBIRTH_FUNERAL_BENEFIT_NAME,
+    SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+    SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
 )
 from app.rules.seed import (
     MATERNITY_LEAVE_BENEFIT_CODE as BENEFIT_CODE,
@@ -386,4 +396,98 @@ def evaluate_paternity_leave_eligibility(
         plan=plan,
         rules_version=rule.version,
         warnings=[],
+    )
+
+
+# --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
+# These evaluators always return the same static result regardless of input. They
+# exist so the frontend can build UI against a stable API shape before the real
+# eligibility logic is written (explicit product decision - see project memory
+# `project-ebobo-stub-benefits-debt`). Each one's `warnings` entry says so plainly;
+# `status` is deliberately always `requires_verification`, never `likely_eligible`, so a
+# stub can never falsely tell a real user they qualify for something nobody has actually
+# evaluated.
+def _static_placeholder_result(
+    benefit_code: str, benefit_name: str, rule: BenefitRuleVersion, todo_note: str
+) -> EligibilityResult:
+    return EligibilityResult(
+        benefit_code=benefit_code,
+        benefit_name=benefit_name,
+        status=EligibilityStatus.requires_verification,
+        met_conditions=[],
+        unmet_conditions=[],
+        missing_data=["ocena merytoryczna dla tego świadczenia nie jest jeszcze zaimplementowana"],
+        possible_solutions=[],
+        plan=None,
+        rules_version=rule.version,
+        warnings=[
+            "TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA: logika oceny uprawnień dla tego świadczenia "
+            "nie została jeszcze zaimplementowana - status jest stały niezależnie od "
+            "podanych danych i służy wyłącznie do budowy widoków frontendowych, nie do "
+            f"realnej oceny uprawnień. {todo_note}"
+        ],
+    )
+
+
+def evaluate_sickness_benefit_during_pregnancy_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    return _static_placeholder_result(
+        SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+        SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
+        rule,
+        "Docelowo: 100% podstawy, do 270 dni (ustawa zasiłkowa art. 8 ust. 1); wymaga "
+        "weryfikacji okresu wyczekiwania (30/90 dni zależnie od tytułu ubezpieczenia, "
+        "art. 4) i statusu ciąży.",
+    )
+
+
+def evaluate_supplementary_maternity_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    return _static_placeholder_result(
+        SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+        SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
+        rule,
+        "Docelowo: 1 tydzień za każdy tydzień hospitalizacji dziecka, limit do 15. lub "
+        "8. tygodnia po porodzie zależnie od okoliczności (Kodeks pracy art. 1802), 100% "
+        "podstawy.",
+    )
+
+
+def evaluate_parental_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    return _static_placeholder_result(
+        PARENTAL_LEAVE_BENEFIT_CODE,
+        PARENTAL_LEAVE_BENEFIT_NAME,
+        rule,
+        "Docelowo: 41/43 tygodni (65/67 z 'Za życiem'), 70% podstawy albo 81,5% łącznie "
+        "z macierzyńskim pod warunkami; wymaga modelu podziału między rodzicami.",
+    )
+
+
+def evaluate_adoption_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    return _static_placeholder_result(
+        ADOPTION_LEAVE_BENEFIT_CODE,
+        ADOPTION_LEAVE_BENEFIT_NAME,
+        rule,
+        "Docelowo: tabela 20/31/33/35/37 tygodni (jak zasiłek macierzyński), min. 9 "
+        "tygodni, 100% podstawy, z limitami wieku dziecka zależnymi od formy "
+        "(przysposobienie / rodzina zastępcza).",
+    )
+
+
+def evaluate_stillbirth_funeral_benefit_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    return _static_placeholder_result(
+        STILLBIRTH_FUNERAL_BENEFIT_CODE,
+        STILLBIRTH_FUNERAL_BENEFIT_NAME,
+        rule,
+        "Docelowo: świadczenie ryczałtowe 7 000 zł (nie procent podstawy wymiaru), "
+        "wniosek Z-12 w ciągu 12 miesięcy od pochówku - wymaga rozszerzenia modelu "
+        "danych o kwotę ryczałtową.",
     )

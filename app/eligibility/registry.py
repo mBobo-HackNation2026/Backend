@@ -11,12 +11,22 @@ from collections.abc import Callable
 
 from app.db.models.benefit_rule import BenefitRuleVersion
 from app.eligibility.engine import (
+    ADOPTION_LEAVE_BENEFIT_CODE,
     ALTERNATIVE_BENEFIT_CODE,
     BENEFIT_CODE,
+    PARENTAL_LEAVE_BENEFIT_CODE,
     PATERNITY_LEAVE_BENEFIT_CODE,
+    SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+    STILLBIRTH_FUNERAL_BENEFIT_CODE,
+    SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+    evaluate_adoption_leave_eligibility,
     evaluate_alternative_maternity_benefit_eligibility,
     evaluate_maternity_leave_eligibility,
+    evaluate_parental_leave_eligibility,
     evaluate_paternity_leave_eligibility,
+    evaluate_sickness_benefit_during_pregnancy_eligibility,
+    evaluate_stillbirth_funeral_benefit_eligibility,
+    evaluate_supplementary_maternity_leave_eligibility,
 )
 from app.eligibility.schemas import EligibilityResult, MaternityLeaveEligibilityRequest
 
@@ -28,4 +38,11 @@ ELIGIBILITY_EVALUATORS: dict[str, EligibilityEvaluator] = {
     BENEFIT_CODE: evaluate_maternity_leave_eligibility,
     ALTERNATIVE_BENEFIT_CODE: evaluate_alternative_maternity_benefit_eligibility,
     PATERNITY_LEAVE_BENEFIT_CODE: evaluate_paternity_leave_eligibility,
+    # Stubs (Faza 2, not yet implemented - see app/eligibility/engine.py's
+    # "STUB BENEFITS" note and project memory `project-ebobo-stub-benefits-debt`):
+    SICKNESS_DURING_PREGNANCY_BENEFIT_CODE: evaluate_sickness_benefit_during_pregnancy_eligibility,
+    SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE: evaluate_supplementary_maternity_leave_eligibility,
+    PARENTAL_LEAVE_BENEFIT_CODE: evaluate_parental_leave_eligibility,
+    ADOPTION_LEAVE_BENEFIT_CODE: evaluate_adoption_leave_eligibility,
+    STILLBIRTH_FUNERAL_BENEFIT_CODE: evaluate_stillbirth_funeral_benefit_eligibility,
 }

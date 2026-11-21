@@ -126,3 +126,36 @@ def test_ensure_seeded_creates_paternity_leave_rule() -> None:
         assert rule.duration_until_birth is False
     finally:
         db.close()
+
+
+def test_ensure_seeded_creates_all_stub_benefit_rules() -> None:
+    from app.rules.seed import (
+        ADOPTION_LEAVE_BENEFIT_CODE,
+        PARENTAL_LEAVE_BENEFIT_CODE,
+        SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+        STILLBIRTH_FUNERAL_BENEFIT_CODE,
+        SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+    )
+
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+        ensure_seeded(db)  # must be idempotent
+
+        stub_codes = [
+            SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+            SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+            PARENTAL_LEAVE_BENEFIT_CODE,
+            ADOPTION_LEAVE_BENEFIT_CODE,
+            STILLBIRTH_FUNERAL_BENEFIT_CODE,
+        ]
+        for code in stub_codes:
+            rule = (
+                db.query(BenefitRuleVersion)
+                .join(BenefitType)
+                .filter(BenefitType.code == code, BenefitRuleVersion.is_current.is_(True))
+                .one()
+            )
+            assert rule is not None, code
+    finally:
+        db.close()

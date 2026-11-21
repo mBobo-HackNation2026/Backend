@@ -18,11 +18,93 @@ ALTERNATIVE_BENEFIT_NAME = (
 PATERNITY_LEAVE_BENEFIT_CODE = "urlop_ojcowski"
 PATERNITY_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu ojcowskiego"
 
+# --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
+# These five benefit codes are registered and return a real HTTP 200 response so the
+# frontend can build UI around a stable API shape, but their eligibility evaluators
+# (app/eligibility/engine.py) are placeholders: they always return the same static
+# `requires_verification` result regardless of input, with a `warnings` entry saying so
+# explicitly. REAL per-request eligibility logic for these five is tracked as outstanding
+# work - see project memory `project-ebobo-stub-benefits-debt` - and must be implemented
+# (with the usual TDD + review process) before these are anything more than a UI
+# placeholder. Do not remove the "TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA" warning without
+# actually implementing the real logic first.
+SICKNESS_DURING_PREGNANCY_BENEFIT_CODE = "zasilek_chorobowy_w_ciazy"
+SICKNESS_DURING_PREGNANCY_BENEFIT_NAME = "Zasiłek chorobowy w ciąży"
+SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE = "uzupelniajacy_urlop_macierzynski"
+SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME = (
+    "Zasiłek za okres uzupełniającego urlopu macierzyńskiego"
+)
+PARENTAL_LEAVE_BENEFIT_CODE = "urlop_rodzicielski"
+PARENTAL_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu rodzicielskiego"
+ADOPTION_LEAVE_BENEFIT_CODE = "urlop_na_warunkach_urlopu_macierzynskiego"
+ADOPTION_LEAVE_BENEFIT_NAME = "Zasiłek za okres urlopu na warunkach urlopu macierzyńskiego"
+STILLBIRTH_FUNERAL_BENEFIT_CODE = "zasilek_pogrzebowy_martwe_urodzenie"
+STILLBIRTH_FUNERAL_BENEFIT_NAME = "Zasiłek pogrzebowy w razie martwego urodzenia dziecka"
+
 
 def ensure_seeded(db: Session) -> None:
     _ensure_maternity_leave_seeded(db)
     _ensure_alternative_benefit_seeded(db)
     _ensure_paternity_leave_seeded(db)
+    _ensure_stub_benefit_seeded(
+        db,
+        code=SICKNESS_DURING_PREGNANCY_BENEFIT_CODE,
+        name=SICKNESS_DURING_PREGNANCY_BENEFIT_NAME,
+        description=(
+            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: 100% "
+            "podstawy wymiaru, do 270 dni (ustawa zasiłkowa art. 8 ust. 1); wymaga "
+            "weryfikacji okresu wyczekiwania (30 dni - ubezpieczenie obowiązkowe / 90 dni "
+            "- dobrowolne, art. 4) oraz statusu ciąży."
+        ),
+    )
+    _ensure_stub_benefit_seeded(
+        db,
+        code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+        name=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
+        description=(
+            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: 100% "
+            "podstawy wymiaru; 1 tydzień za każdy tydzień hospitalizacji dziecka, limit "
+            "do 15. tygodnia po porodzie (urodzenie <28 tyg. ciąży lub masa ≤1000g) albo "
+            "do 8. tygodnia po porodzie w pozostałych kwalifikujących przypadkach "
+            "(Kodeks pracy art. 1802)."
+        ),
+    )
+    _ensure_stub_benefit_seeded(
+        db,
+        code=PARENTAL_LEAVE_BENEFIT_CODE,
+        name=PARENTAL_LEAVE_BENEFIT_NAME,
+        description=(
+            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: 41 tyg. "
+            "(1 dziecko) / 43 tyg. (2+ dzieci), z zaświadczeniem 'Za życiem' 65/67 tyg.; "
+            "70% podstawy (albo 81,5% łącznie z macierzyńskim, jeśli wniosek złożony w "
+            "ciągu 21 dni po porodzie obejmujący pełny wymiar - z wyjątkiem "
+            "nieprzenoszalnych 9 tygodni drugiego rodzica, zawsze 70%); wymaga "
+            "weryfikacji podziału między rodzicami."
+        ),
+    )
+    _ensure_stub_benefit_seeded(
+        db,
+        code=ADOPTION_LEAVE_BENEFIT_CODE,
+        name=ADOPTION_LEAVE_BENEFIT_NAME,
+        description=(
+            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: ta sama "
+            "tabela 20/31/33/35/37 tygodni co zasiłek macierzyński, min. 9 tygodni, 100% "
+            "podstawy; limity wieku: rodzina zastępcza do 7 lat dziecka (10 lat przy "
+            "odroczeniu obowiązku szkolnego), wniosek o przysposobienie do 14 lat dziecka."
+        ),
+    )
+    _ensure_stub_benefit_seeded(
+        db,
+        code=STILLBIRTH_FUNERAL_BENEFIT_CODE,
+        name=STILLBIRTH_FUNERAL_BENEFIT_NAME,
+        description=(
+            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: "
+            "świadczenie ryczałtowe 7 000 zł niezależnie od faktycznych kosztów (nie "
+            "procent podstawy wymiaru), wniosek na formularzu Z-12 w ciągu 12 miesięcy "
+            "od pochówku (Poradnik ZUS 2026, s.35-36) - ten model danych (rate_percentage "
+            "+ weeks) nie pasuje do świadczenia kwotowego i będzie wymagał rozszerzenia."
+        ),
+    )
 
 
 def _ensure_maternity_leave_seeded(db: Session) -> None:
@@ -269,6 +351,47 @@ def _ensure_paternity_leave_seeded(db: Session) -> None:
                 "applies_to": None,
             },
         ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_stub_benefit_seeded(db: Session, *, code: str, name: str, description: str) -> None:
+    """Seeds a minimal, mostly-placeholder rule row for a benefit whose eligibility
+    evaluator is itself a static placeholder (see the STUB BENEFITS note above). The
+    numeric fields here are never actually read by the evaluator - they exist only
+    because BenefitRuleVersion's columns are NOT NULL and get_current_rule needs a row
+    to find, not because they're meaningful figures for this benefit yet.
+    """
+    benefit_type = db.query(BenefitType).filter_by(code=code).one_or_none()
+    if benefit_type is None:
+        benefit_type = BenefitType(code=code, name=name, description=description)
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        rate_percentage=Decimal("0.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        legal_basis=[description],
+        deadlines=[],
+        required_documents=[],
     )
     db.add(rule)
     db.commit()

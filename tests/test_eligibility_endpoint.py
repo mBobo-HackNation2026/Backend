@@ -3,6 +3,13 @@ from fastapi.testclient import TestClient
 MATERNITY_LEAVE_CODE = "zasilek_macierzynski_urlop_macierzynski"
 ALTERNATIVE_BENEFIT_CODE = "zasilek_w_wysokosci_zasilku_macierzynskiego"
 PATERNITY_LEAVE_CODE = "urlop_ojcowski"
+STUB_BENEFIT_CODES = [
+    "zasilek_chorobowy_w_ciazy",
+    "uzupelniajacy_urlop_macierzynski",
+    "urlop_rodzicielski",
+    "urlop_na_warunkach_urlopu_macierzynskiego",
+    "zasilek_pogrzebowy_martwe_urodzenie",
+]
 
 
 def test_check_eligibility_returns_likely_eligible_for_insured_mother(client: TestClient) -> None:
@@ -115,3 +122,23 @@ def test_check_eligibility_paternity_leave_not_eligible_after_deadline(
     body = response.json()
     assert body["status"] == "not_eligible"
     assert body["plan"] is None
+
+
+def test_stub_benefits_are_registered_and_return_requires_verification(
+    client: TestClient,
+) -> None:
+    """Each Phase 2 stub benefit must be reachable and honest about being a
+    placeholder (requires_verification, never likely_eligible, with an explicit
+    warning) - never a silent fake 'yes'."""
+    for code in STUB_BENEFIT_CODES:
+        response = client.post(
+            f"/api/v1/eligibility/check/{code}",
+            json={"children_count": 1, "insured_at_birth": True},
+        )
+
+        assert response.status_code == 200, code
+        body = response.json()
+        assert body["status"] == "requires_verification", code
+        assert body["plan"] is None, code
+        assert body["benefit_code"] == code
+        assert any("TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA" in w for w in body["warnings"]), code
