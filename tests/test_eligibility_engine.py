@@ -2,7 +2,11 @@ from datetime import date
 from decimal import Decimal
 
 from app.db.models.benefit_rule import BenefitRuleVersion
-from app.eligibility.engine import evaluate_maternity_leave_eligibility
+from app.eligibility.engine import (
+    BENEFIT_CODE,
+    evaluate_alternative_maternity_benefit_eligibility,
+    evaluate_maternity_leave_eligibility,
+)
 from app.eligibility.schemas import (
     EligibilityStatus,
     EmploymentEndedReason,
@@ -33,6 +37,25 @@ def _make_rule() -> BenefitRuleVersion:
         required_documents=[
             {"code": "x", "name": "Wniosek", "when": "przed urlopem", "applies_to": None},
             {"code": "z3", "name": "Zaświadczenie Z-3", "when": "...", "applies_to": "standard"},
+        ],
+    )
+
+
+def _make_alternative_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=True,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        legal_basis=["ustawa zasiłkowa art. 30"],
+        deadlines=["Jak najszybciej po ustaniu ubezpieczenia"],
+        required_documents=[
+            {"code": "wniosek_zam", "name": "Wniosek ZAM", "when": "...", "applies_to": None},
         ],
     )
 
@@ -247,3 +270,78 @@ def test_plan_institution_and_deadlines_come_from_the_rule_not_a_literal() -> No
 
     assert result.plan.institution == "Testowa instytucja"
     assert result.plan.deadlines == ["Testowy termin"]
+
+
+def test_alternative_benefit_eligible_for_employer_liquidation() -> None:
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.upadlosc_likwidacja_smierc_pracodawcy,
+    )
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks is None
+    assert result.plan.duration_description == "do dnia porodu"
+    assert any("innego zatrudnienia" in w for w in result.warnings)
+
+
+def test_alternative_benefit_not_applicable_for_unlawful_dismissal() -> None:
+    """art. 30 ust. 3 (this benefit) does not list unlawful-termination-by-court-ruling as a
+    trigger - only art. 30 ust. 1 pkt 2 does, which grants the *standard* benefit instead."""
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        employment_ended_reason=EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu,
+    )
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.plan is None
+    assert any(
+        s.related_benefit_code == BENEFIT_CODE and s.type == SolutionType.alternative_benefit
+        for s in result.possible_solutions
+    )
+
+
+def test_alternative_benefit_requires_verification_when_insured_status_unknown() -> None:
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=None)
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.missing_data
+    assert result.plan is None
+
+
+def test_alternative_benefit_requires_verification_when_reason_unknown() -> None:
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1, insured_at_birth=False, employment_ended_reason=None
+    )
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.missing_data
+    assert result.plan is None
+
+
+def test_alternative_benefit_points_back_to_standard_benefit_when_still_insured() -> None:
+    rule = _make_alternative_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=True)
+
+    result = evaluate_alternative_maternity_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.plan is None
+    assert any(
+        s.related_benefit_code == BENEFIT_CODE and s.type == SolutionType.alternative_benefit
+        for s in result.possible_solutions
+    )

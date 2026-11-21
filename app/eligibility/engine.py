@@ -19,6 +19,10 @@ from app.eligibility.schemas import (
     SolutionType,
 )
 from app.rules.seed import (
+    ALTERNATIVE_BENEFIT_CODE,
+    ALTERNATIVE_BENEFIT_NAME,
+)
+from app.rules.seed import (
     MATERNITY_LEAVE_BENEFIT_CODE as BENEFIT_CODE,
 )
 from app.rules.seed import (
@@ -205,6 +209,90 @@ def evaluate_maternity_leave_eligibility(
     return EligibilityResult(
         benefit_code=BENEFIT_CODE,
         benefit_name=BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
+    )
+
+
+def evaluate_alternative_maternity_benefit_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    if request.insured_at_birth is None:
+        missing_data.append("status ubezpieczenia chorobowego w dniu porodu")
+    elif request.insured_at_birth:
+        unmet_conditions.append(
+            "świadczenie dotyczy wyłącznie osób, których ubezpieczenie chorobowe ustało w "
+            "okresie ciąży - wnioskodawczyni była ubezpieczona w dniu porodu"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.alternative_benefit,
+                description=(
+                    "Wnioskodawczyni była ubezpieczona w dniu porodu, więc właściwym "
+                    "świadczeniem jest zasiłek macierzyński za okres urlopu macierzyńskiego, "
+                    "a nie to świadczenie alternatywne."
+                ),
+                legal_basis="ustawa zasiłkowa art. 29 ust. 1 pkt 1",
+                related_benefit_code=BENEFIT_CODE,
+            )
+        )
+    elif request.employment_ended_reason is None:
+        missing_data.append("powód ustania ubezpieczenia chorobowego w okresie ciąży")
+    elif request.employment_ended_reason == EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu:
+        # art. 30 ust. 3 (this benefit) only lists death/upadłość/likwidacja pracodawcy as
+        # triggers - NOT unlawful termination by court ruling. That reason instead grants the
+        # *standard* benefit under art. 30 ust. 1 pkt 2 - point there, don't grant this one.
+        unmet_conditions.append(
+            "rozwiązanie umowy z naruszeniem przepisów prawa nie jest przesłanką tego "
+            "świadczenia (ustawa zasiłkowa art. 30 ust. 3) - uprawnia wyłącznie do zwykłego "
+            "zasiłku macierzyńskiego"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.alternative_benefit,
+                description=(
+                    "Rozwiązanie umowy z naruszeniem przepisów prawa, stwierdzone "
+                    "prawomocnym orzeczeniem sądu, uprawnia do zwykłego zasiłku "
+                    "macierzyńskiego za okres urlopu macierzyńskiego (nie do tego "
+                    "świadczenia) - sprawdź to świadczenie osobno."
+                ),
+                legal_basis="ustawa zasiłkowa art. 30 ust. 1 pkt 2",
+                related_benefit_code=BENEFIT_CODE,
+            )
+        )
+    else:
+        met_conditions.append(
+            "ubezpieczenie ustało w okresie ciąży wskutek śmierci, upadłości lub likwidacji "
+            "pracodawcy (ustawa zasiłkowa art. 30 ust. 3)"
+        )
+        warnings.append(
+            "Świadczenie przysługuje dodatkowo tylko, gdy nie zapewniono innego zatrudnienia "
+            "(ustawa zasiłkowa art. 30 ust. 3) - ta ocena nie weryfikuje tego warunku."
+        )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    # Unlike the standard evaluator, missing_data alone (unknown insured_at_birth or
+    # unknown employment_ended_reason) must NOT surface a plan here: both are the core
+    # trigger conditions for this benefit (there's no independent condition left to
+    # confirm), so only a confirmed likely_eligible result warrants a plan.
+    plan = _build_plan(rule, request) if status == EligibilityStatus.likely_eligible else None
+
+    return EligibilityResult(
+        benefit_code=ALTERNATIVE_BENEFIT_CODE,
+        benefit_name=ALTERNATIVE_BENEFIT_NAME,
         status=status,
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
