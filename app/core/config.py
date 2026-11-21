@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-key-change-me-in-production"
     access_token_expire_minutes: int = 60
 
+    # Sesja użytkownika końcowego (anonimowa przy pierwszym otwarciu appki,
+    # uwierzytelniona po symulowanym logowaniu mObywatel) - długa ważność,
+    # bo reprezentuje instalację aplikacji, nie jednorazową sesję admina.
+    user_access_token_expire_minutes: int = 60 * 24 * 30
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

@@ -38,6 +38,7 @@ known-first-party = ["app"]
 # FastAPI's `Depends(...)` in argument defaults is the idiomatic pattern.
 "app/api/**" = ["B008"]
 "app/admin/**" = ["B008"]
+"app/auth/**" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
