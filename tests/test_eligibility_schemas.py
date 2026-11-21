@@ -1,7 +1,19 @@
+from decimal import Decimal
+
 import pytest
 from pydantic import ValidationError
 
-from app.eligibility.schemas import InsuranceTitle, MaternityLeaveEligibilityRequest
+from app.eligibility.schemas import (
+    BenefitPlan,
+    DataSource,
+    EligibilityResult,
+    EligibilityStatus,
+    InsuranceTitle,
+    MaternityLeaveEligibilityRequest,
+    PossibleSolution,
+    RequiredDocument,
+    SolutionType,
+)
 
 
 def test_children_count_must_be_at_least_one() -> None:
@@ -24,3 +36,66 @@ def test_insurance_title_accepts_known_values() -> None:
     )
 
     assert request.insurance_title == InsuranceTitle.dzialalnosc_gospodarcza
+
+
+def test_eligibility_result_round_trips_through_json() -> None:
+    result = EligibilityResult(
+        benefit_code="maternity_leave",
+        benefit_name="Zasiłek macierzyński",
+        status=EligibilityStatus.requires_verification,
+        met_conditions=["Ubezpieczenie chorobowe w dniu porodu"],
+        unmet_conditions=[],
+        missing_data=["Tytuł ubezpieczenia"],
+        possible_solutions=[
+            PossibleSolution(
+                type=SolutionType.corrective_action,
+                description="Zgłosić zadłużenie składkowe do umorzenia.",
+                legal_basis="art. 1 ustawy przykładowej",
+            )
+        ],
+        plan=BenefitPlan(
+            weeks=20,
+            rate_percentage=Decimal("100"),
+            institution="ZUS",
+            required_documents=[
+                RequiredDocument(
+                    code="ZUS_ZLA",
+                    name="Zaświadczenie lekarskie",
+                    when="przy składaniu wniosku",
+                )
+            ],
+            deadlines=["Wniosek w ciągu 12 miesięcy od porodu"],
+            legal_basis=["ustawa o świadczeniach"],
+        ),
+        rules_version=3,
+    )
+
+    payload = result.model_dump_json()
+    restored = EligibilityResult.model_validate_json(payload)
+
+    assert restored == result
+    assert restored.status == EligibilityStatus.requires_verification
+    assert restored.data_source == DataSource.user
+    assert restored.plan is not None
+    assert restored.plan.required_documents[0].code == "ZUS_ZLA"
+    assert restored.possible_solutions[0].type == SolutionType.corrective_action
+    assert '"status":"requires_verification"' in payload
+    assert '"data_source":"user"' in payload
+
+
+def test_data_source_rejects_unknown_value() -> None:
+    with pytest.raises(ValidationError):
+        EligibilityResult.model_validate(
+            {
+                "benefit_code": "maternity_leave",
+                "benefit_name": "Zasiłek macierzyński",
+                "status": "not_eligible",
+                "met_conditions": [],
+                "unmet_conditions": [],
+                "missing_data": [],
+                "possible_solutions": [],
+                "plan": None,
+                "rules_version": 1,
+                "data_source": "zus_api",
+            }
+        )
