@@ -6,8 +6,8 @@ PATERNITY_LEAVE_CODE = "urlop_ojcowski"
 PARENTAL_LEAVE_CODE = "urlop_rodzicielski"
 SICKNESS_DURING_PREGNANCY_CODE = "zasilek_chorobowy_w_ciazy"
 REHABILITATION_BENEFIT_CODE = "swiadczenie_rehabilitacyjne"
+SUPPLEMENTARY_MATERNITY_LEAVE_CODE = "uzupelniajacy_urlop_macierzynski"
 STUB_BENEFIT_CODES = [
-    "uzupelniajacy_urlop_macierzynski",
     "urlop_na_warunkach_urlopu_macierzynskiego",
     "zasilek_pogrzebowy_martwe_urodzenie",
 ]
@@ -260,6 +260,47 @@ def test_check_eligibility_rehabilitation_benefit_not_eligible_when_excluded(
             "medical_prognosis_recovery_possible": True,
             "excluded_from_rehabilitation_benefit": True,
             "is_pregnant": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_eligible"
+    assert body["plan"] is None
+
+
+def test_check_eligibility_supplementary_maternity_leave_likely_eligible(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{SUPPLEMENTARY_MATERNITY_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "child_hospitalization_weeks": 3,
+            "gestational_week_at_birth": 30,
+            "birth_weight_grams": 1800,
+            "postpartum_weeks_elapsed": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert body["plan"]["weeks"] == 3
+    assert body["plan"]["rate_percentage"] == "100.00"
+
+
+def test_check_eligibility_supplementary_maternity_leave_deadline_passed(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{SUPPLEMENTARY_MATERNITY_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "child_hospitalization_weeks": 3,
+            "gestational_week_at_birth": 30,
+            "birth_weight_grams": 1800,
+            "postpartum_weeks_elapsed": 9,
         },
     )
 

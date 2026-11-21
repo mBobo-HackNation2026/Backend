@@ -132,7 +132,6 @@ def test_ensure_seeded_creates_all_stub_benefit_rules() -> None:
     from app.rules.seed import (
         ADOPTION_LEAVE_BENEFIT_CODE,
         STILLBIRTH_FUNERAL_BENEFIT_CODE,
-        SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
     )
 
     db = SessionLocal()
@@ -141,7 +140,6 @@ def test_ensure_seeded_creates_all_stub_benefit_rules() -> None:
         ensure_seeded(db)  # must be idempotent
 
         stub_codes = [
-            SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
             ADOPTION_LEAVE_BENEFIT_CODE,
             STILLBIRTH_FUNERAL_BENEFIT_CODE,
         ]
@@ -178,6 +176,30 @@ def test_ensure_seeded_creates_sickness_during_pregnancy_rule() -> None:
         assert rule.rate_percentage == Decimal("100.00")
         assert rule.weeks_by_child_count is None
         assert rule.institution == "ZUS"
+    finally:
+        db.close()
+
+
+def test_ensure_seeded_creates_supplementary_maternity_leave_rule() -> None:
+    from app.rules.seed import SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE
+
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+        ensure_seeded(db)  # must be idempotent
+
+        rule = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
+            )
+            .one()
+        )
+
+        assert rule.rate_percentage == Decimal("100.00")
+        assert rule.weeks_by_child_count is None
     finally:
         db.close()
 

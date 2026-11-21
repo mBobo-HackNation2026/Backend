@@ -11,6 +11,7 @@ from app.eligibility.engine import (
     evaluate_paternity_leave_eligibility,
     evaluate_rehabilitation_benefit_eligibility,
     evaluate_sickness_benefit_during_pregnancy_eligibility,
+    evaluate_supplementary_maternity_leave_eligibility,
 )
 from app.eligibility.schemas import (
     EligibilityStatus,
@@ -958,3 +959,105 @@ def test_rehabilitation_benefit_self_employed_debt_over_threshold_is_not_eligibl
 
     assert result.status == EligibilityStatus.not_eligible
     assert any(s.type == SolutionType.corrective_action for s in result.possible_solutions)
+
+
+def _make_supplementary_leave_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="Pracodawca albo ZUS",
+        legal_basis=["Kodeks pracy art. 1802 §1"],
+        deadlines=["Przed upływem granicznego tygodnia po porodzie"],
+        required_documents=[
+            {"code": "wniosek", "name": "Wniosek", "when": "...", "applies_to": None},
+        ],
+    )
+
+
+def test_supplementary_leave_likely_eligible_standard_case() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=3,
+        gestational_week_at_birth=34,
+        birth_weight_grams=2200,
+        postpartum_weeks_elapsed=4,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 3
+    assert result.plan.rate_percentage == Decimal("100.00")
+
+
+def test_supplementary_leave_extended_deadline_for_very_premature_birth() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=2,
+        gestational_week_at_birth=25,
+        birth_weight_grams=900,
+        postpartum_weeks_elapsed=12,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    # 12 weeks post-partum is past the standard 8-week deadline but within the
+    # extended 15-week deadline for very premature/low-weight births.
+    assert result.status == EligibilityStatus.likely_eligible
+
+
+def test_supplementary_leave_not_eligible_past_standard_8_week_deadline() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=2,
+        gestational_week_at_birth=34,
+        birth_weight_grams=2200,
+        postpartum_weeks_elapsed=9,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_supplementary_leave_not_eligible_without_hospitalization() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=0,
+        gestational_week_at_birth=38,
+        birth_weight_grams=3200,
+        postpartum_weeks_elapsed=1,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_supplementary_leave_requires_verification_when_hospitalization_weeks_missing() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        gestational_week_at_birth=34,
+        birth_weight_grams=2200,
+        postpartum_weeks_elapsed=4,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("pobytu dziecka w szpitalu" in m for m in result.missing_data)
+    assert result.plan is None

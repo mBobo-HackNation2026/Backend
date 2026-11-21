@@ -55,18 +55,7 @@ def ensure_seeded(db: Session) -> None:
     _ensure_paternity_leave_seeded(db)
     _ensure_sickness_during_pregnancy_seeded(db)
     _ensure_rehabilitation_benefit_seeded(db)
-    _ensure_stub_benefit_seeded(
-        db,
-        code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
-        name=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
-        description=(
-            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: 100% "
-            "podstawy wymiaru; 1 tydzień za każdy tydzień hospitalizacji dziecka, limit "
-            "do 15. tygodnia po porodzie (urodzenie <28 tyg. ciąży lub masa ≤1000g) albo "
-            "do 8. tygodnia po porodzie w pozostałych kwalifikujących przypadkach "
-            "(Kodeks pracy art. 1802)."
-        ),
-    )
+    _ensure_supplementary_maternity_leave_seeded(db)
     _ensure_parental_leave_seeded(db)
     _ensure_stub_benefit_seeded(
         db,
@@ -581,6 +570,88 @@ def _ensure_rehabilitation_benefit_seeded(db: Session) -> None:
                     "Orzeczenie lekarza orzecznika ZUS o rokowaniu odzyskania zdolności "
                     "do pracy"
                 ),
+                "when": "wraz z wnioskiem",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_z3",
+                "name": "Zaświadczenie płatnika składek Z-3",
+                "when": "gdy płatnikiem zasiłku jest ZUS, a nie pracodawca",
+                "applies_to": "standard",
+            },
+        ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_supplementary_maternity_leave_seeded(db: Session) -> None:
+    benefit_type = (
+        db.query(BenefitType)
+        .filter_by(code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE)
+        .one_or_none()
+    )
+    if benefit_type is None:
+        benefit_type = BenefitType(
+            code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+            name=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
+            description=(
+                "Przedłużenie urlopu macierzyńskiego o 1 tydzień za każdy tydzień "
+                "pobytu dziecka w szpitalu po porodzie, jeśli wykorzystane w terminie "
+                "(15. albo 8. tydzień po porodzie, zależnie od okoliczności urodzenia). "
+                "100% podstawy wymiaru."
+            ),
+        )
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution=(
+            "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
+            "chorobowego) albo ZUS"
+        ),
+        deadlines=[
+            "Wniosek o uzupełniający urlop macierzyński - najpóźniej do granicznego "
+            "tygodnia po porodzie (15. albo 8., zależnie od okoliczności urodzenia); "
+            "po tym terminie prawo wygasa (Kodeks pracy art. 1802 §1).",
+        ],
+        legal_basis=[
+            "Kodeks pracy art. 1802 §1 (1 tydzień urlopu za każdy tydzień hospitalizacji "
+            "dziecka po porodzie, limit do 15. tygodnia po porodzie przy urodzeniu "
+            "<28 tyg. ciąży lub masie ≤1000g, albo do 8. tygodnia po porodzie w "
+            "pozostałych kwalifikujących przypadkach)",
+            "ustawa zasiłkowa art. 29 ust. 1 pkt 1 i art. 31 ust. 1 (100% podstawy "
+            "wymiaru, jak zwykły zasiłek macierzyński)",
+            "ustawa zasiłkowa art. 2a (wyłączenie prawa z powodu zadłużenia składkowego)",
+        ],
+        required_documents=[
+            {
+                "code": "wniosek_uzupelniajacy_urlop_macierzynski",
+                "name": "Wniosek o udzielenie uzupełniającego urlopu macierzyńskiego",
+                "when": "przed upływem granicznego tygodnia po porodzie",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_szpitalne",
+                "name": "Zaświadczenie szpitalne potwierdzające okres hospitalizacji dziecka",
                 "when": "wraz z wnioskiem",
                 "applies_to": None,
             },

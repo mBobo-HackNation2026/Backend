@@ -45,7 +45,7 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   dobrowolnej, rodzaj premii, przerwa między zasiłkami). Front może budować
   pełną ankietę na tym kontrakcie już teraz - większość pól nie ma jeszcze
   logiki po stronie silnika (patrz sekcja "W trakcie" niżej).
-- **6 świadczeń w pełni zaimplementowane** (realna logika oceny):
+- **7 świadczeń w pełni zaimplementowane** (realna logika oceny):
   - `zasilek_macierzynski_urlop_macierzynski` — zasiłek macierzyński za okres
     urlopu macierzyńskiego.
   - `zasilek_w_wysokosci_zasilku_macierzynskiego` — alternatywna ścieżka z
@@ -75,7 +75,7 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     pracy, wcześniejszy długi staż ubezpieczeniowy) - sygnalizuje to przez
     `warnings`, nie udaje że je sprawdziło. Zob. `app/eligibility/engine.py` →
     `evaluate_sickness_benefit_during_pregnancy_eligibility`.
-  - `swiadczenie_rehabilitacyjne` — **nowość, zupełnie nowe świadczenie**
+  - `swiadczenie_rehabilitacyjne` — zupełnie nowe świadczenie
     (nigdy nie było placeholderem - dodane i od razu zaimplementowane w tej
     samej iteracji po priority-reset briefie). Przysługuje po wyczerpaniu
     zasiłku chorobowego (`sickness_benefit_period_exhausted`), gdy lekarz
@@ -89,12 +89,24 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     nie jest jeszcze rozbijany miesiąc po miesiącu - to zadanie przyszłego
     kalkulatora (priorytet #3). Zob. `app/eligibility/engine.py` →
     `evaluate_rehabilitation_benefit_eligibility`.
+  - `uzupelniajacy_urlop_macierzynski` — **nowość**: uzupełniający urlop
+    macierzyński (hospitalizacja dziecka po porodzie), 1 tydzień urlopu za
+    każdy tydzień hospitalizacji (`child_hospitalization_weeks`), 100%
+    podstawy. Graniczny termin skorzystania to 15. tydzień po porodzie przy
+    urodzeniu <28 tyg. ciąży lub masie ≤1000g, w pozostałych przypadkach 8.
+    tydzień (`gestational_week_at_birth`/`birth_weight_grams` ustalają które,
+    `postpartum_weeks_elapsed` sprawdza czy termin minął) - uproszczony model
+    dwóch progów zgodny z tym, co było już wcześniej udokumentowane publicznie;
+    trzeci, węższy przypadek z Kodeksu pracy art. 1802 §1 (poród o czasie z
+    późniejszą hospitalizacją) nie jest jeszcze modelowany. Zob.
+    `app/eligibility/engine.py` →
+    `evaluate_supplementary_maternity_leave_eligibility`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 
 ### W trakcie / tymczasowe
 
-**3 świadczenia zarejestrowane jako placeholdery** — odpowiadają `200 OK`, ale bez
+**2 świadczenia zarejestrowane jako placeholdery** — odpowiadają `200 OK`, ale bez
 realnej logiki oceny: zawsze zwracają `status: requires_verification` z jawnym
 ostrzeżeniem `"TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA"` w `warnings` i `plan: null`,
 nigdy fałszywe `likely_eligible` — zrobione celowo, żeby front mógł budować
@@ -104,12 +116,11 @@ projektu `project-ebobo-stub-benefits-debt`:
 
 | Kod świadczenia | Co to jest |
 |---|---|
-| `uzupelniajacy_urlop_macierzynski` | Uzupełniający urlop macierzyński (hospitalizacja dziecka) |
 | `urlop_na_warunkach_urlopu_macierzynskiego` | Adopcja / rodzina zastępcza |
 | `zasilek_pogrzebowy_martwe_urodzenie` | Zasiłek pogrzebowy przy martwym urodzeniu (kwota ryczałtowa, wymaga rozszerzenia schematu `BenefitRuleVersion`) |
 
 Traktuj prośbę "dokończ Fazę 2" / "dopracuj świadczenia" jako niekompletną,
-dopóki te 3 kody nie przestaną być statyczne.
+dopóki te 2 kody nie przestaną być statyczne.
 
 ### Co zostało (priorytety, reset 2026-11-21)
 
@@ -146,7 +157,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | # | Zakres | Status |
 |---|---|---|
 | 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ✅ zrobione (schemat w `app/eligibility/schemas.py`, patrz "Zrobione" wyżej) |
-| 2 | Dopracowanie silnika uprawnień, w kolejności: ✅ urlop rodzicielski (+ podział między rodzicami), ✅ zasiłek chorobowy w ciąży, ✅ **świadczenie rehabilitacyjne** (nowe świadczenie, 90%/75%/100% w ciąży, max 12 mies.), uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, pozostałe sytuacje szczególne | 🟡 6 zrobionych, 3 placeholdery (patrz wyżej) |
+| 2 | Dopracowanie silnika uprawnień, w kolejności: ✅ urlop rodzicielski (+ podział między rodzicami), ✅ zasiłek chorobowy w ciąży, ✅ świadczenie rehabilitacyjne (nowe świadczenie, 90%/75%/100% w ciąży, max 12 mies.), ✅ uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, pozostałe sytuacje szczególne | 🟡 7 zrobionych, 2 placeholdery (patrz wyżej) |
 | 2a | **Jawne oznaczenie statusu implementacji** (implemented/stub) w odpowiedzi API — placeholdery dziś zwracają `HTTP 200` z ostrzeżeniem tylko w tekście; FE potrzebuje pola, które da się odczytać programistycznie | ⬜ nierozpoczęte |
 | 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ⬜ nierozpoczęte |
 | 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |

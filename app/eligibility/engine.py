@@ -890,18 +890,145 @@ def evaluate_rehabilitation_benefit_eligibility(
     )
 
 
+_SUPPLEMENTARY_LEAVE_EXTENDED_DEADLINE_WEEK = 15
+_SUPPLEMENTARY_LEAVE_STANDARD_DEADLINE_WEEK = 8
+_SUPPLEMENTARY_LEAVE_EXTENDED_MAX_GESTATIONAL_WEEK = 28
+_SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS = 1000
+
+
+def _build_supplementary_maternity_leave_plan(
+    rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest, weeks: int
+) -> BenefitPlan:
+    is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+    required_documents = [
+        RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+        for doc in rule.required_documents
+        if _document_applies(doc, is_self_employed)
+    ]
+    return BenefitPlan(
+        weeks=weeks,
+        duration_description=None,
+        rate_percentage=rule.rate_percentage,
+        institution=rule.institution,
+        required_documents=required_documents,
+        deadlines=list(rule.deadlines),
+        legal_basis=list(rule.legal_basis),
+    )
+
+
+def evaluate_supplementary_maternity_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    weeks: int | None = None
+    if request.child_hospitalization_weeks is None:
+        missing_data.append("liczba tygodni pobytu dziecka w szpitalu po porodzie")
+    elif request.child_hospitalization_weeks <= 0:
+        unmet_conditions.append(
+            "brak hospitalizacji dziecka po porodzie - uzupełniający urlop "
+            "macierzyński nie ma zastosowania (Kodeks pracy art. 1802 §1)"
+        )
+    else:
+        weeks = request.child_hospitalization_weeks
+        met_conditions.append(
+            f"hospitalizacja dziecka po porodzie przez {weeks} tyg. (Kodeks pracy "
+            "art. 1802 §1)"
+        )
+
+    deadline_week: int | None = None
+    if request.gestational_week_at_birth is None or request.birth_weight_grams is None:
+        missing_data.append(
+            "tydzień ciąży w dniu porodu i masa urodzeniowa dziecka (potrzebne do "
+            "ustalenia granicznego tygodnia po porodzie: 15. albo 8.)"
+        )
+    else:
+        is_extended_case = (
+            request.gestational_week_at_birth < _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_GESTATIONAL_WEEK
+            or request.birth_weight_grams <= _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS
+        )
+        deadline_week = (
+            _SUPPLEMENTARY_LEAVE_EXTENDED_DEADLINE_WEEK
+            if is_extended_case
+            else _SUPPLEMENTARY_LEAVE_STANDARD_DEADLINE_WEEK
+        )
+        met_conditions.append(
+            f"graniczny termin skorzystania z urlopu: {deadline_week}. tydzień po "
+            "porodzie (Kodeks pracy art. 1802 §1)"
+        )
+
+    if request.postpartum_weeks_elapsed is None:
+        missing_data.append("liczba tygodni, które upłynęły od porodu")
+    elif deadline_week is not None:
+        if request.postpartum_weeks_elapsed > deadline_week:
+            unmet_conditions.append(
+                f"minął graniczny {deadline_week}. tydzień po porodzie - termin na "
+                "skorzystanie z uzupełniającego urlopu macierzyńskiego wygasł (Kodeks "
+                "pracy art. 1802 §1)"
+            )
+            solutions.append(
+                PossibleSolution(
+                    type=SolutionType.limitation,
+                    description=(
+                        "Termin na skorzystanie z uzupełniającego urlopu macierzyńskiego "
+                        "upłynął - prawo do niego wygasa po wskazanym tygodniu po "
+                        "porodzie i nie podlega przywróceniu."
+                    ),
+                    legal_basis="Kodeks pracy art. 1802 §1",
+                )
+            )
+        else:
+            met_conditions.append(
+                f"termin nie minął - {request.postpartum_weeks_elapsed} tyg. po "
+                f"porodzie, granica {deadline_week} tyg. (Kodeks pracy art. 1802 §1)"
+            )
+
+    _apply_self_employed_debt_check(
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+    )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    plan = (
+        _build_supplementary_maternity_leave_plan(rule, request, weeks)
+        if is_standard_path_open and weeks is not None
+        else None
+    )
+
+    return EligibilityResult(
+        benefit_code=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
+        benefit_name=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
+    )
+
+
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These three evaluators (supplementary maternity leave, adoption/foster care leave,
-# stillbirth funeral benefit) always return the same static result regardless of input.
-# They exist so the frontend can build UI against a stable API shape before the real
-# eligibility logic is written (explicit product decision - see project memory
-# `project-ebobo-stub-benefits-debt`). Each one's `warnings` entry says so plainly;
-# `status` is deliberately always `requires_verification`, never `likely_eligible`, so a
-# stub can never falsely tell a real user they qualify for something nobody has actually
-# evaluated. Parental leave (urlop rodzicielski) and sickness benefit during pregnancy
-# (zasiłek chorobowy w ciąży) used to be in this group - see
-# evaluate_parental_leave_eligibility and evaluate_sickness_benefit_during_pregnancy_eligibility
-# above for their real logic.
+# These two evaluators (adoption/foster care leave, stillbirth funeral benefit) always
+# return the same static result regardless of input. They exist so the frontend can
+# build UI against a stable API shape before the real eligibility logic is written
+# (explicit product decision - see project memory `project-ebobo-stub-benefits-debt`).
+# Each one's `warnings` entry says so plainly; `status` is deliberately always
+# `requires_verification`, never `likely_eligible`, so a stub can never falsely tell a
+# real user they qualify for something nobody has actually evaluated. Parental leave
+# (urlop rodzicielski), sickness benefit during pregnancy (zasiłek chorobowy w ciąży)
+# and supplementary maternity leave (uzupełniający urlop macierzyński) used to be in
+# this group - see evaluate_parental_leave_eligibility,
+# evaluate_sickness_benefit_during_pregnancy_eligibility and
+# evaluate_supplementary_maternity_leave_eligibility above for their real logic.
 def _static_placeholder_result(
     benefit_code: str, benefit_name: str, rule: BenefitRuleVersion, todo_note: str
 ) -> EligibilityResult:
@@ -924,17 +1051,6 @@ def _static_placeholder_result(
     )
 
 
-def evaluate_supplementary_maternity_leave_eligibility(
-    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
-) -> EligibilityResult:
-    return _static_placeholder_result(
-        SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE,
-        SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
-        rule,
-        "Docelowo: 1 tydzień za każdy tydzień hospitalizacji dziecka, limit do 15. lub "
-        "8. tygodnia po porodzie zależnie od okoliczności (Kodeks pracy art. 1802), 100% "
-        "podstawy.",
-    )
 
 
 def evaluate_adoption_leave_eligibility(
