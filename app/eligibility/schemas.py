@@ -399,8 +399,20 @@ class BenefitPlan(BaseModel):
             "Null, gdy obowiązuje weeks."
         ),
     )
-    rate_percentage: Decimal = Field(
-        description="Stawka świadczenia w procentach podstawy wymiaru."
+    rate_percentage: Decimal | None = Field(
+        default=None,
+        description=(
+            "Stawka świadczenia w procentach podstawy wymiaru. Null, gdy świadczenie "
+            "jest kwotą ryczałtową - patrz lump_sum_amount_zl."
+        ),
+    )
+    lump_sum_amount_zl: Decimal | None = Field(
+        default=None,
+        description=(
+            "Kwota ryczałtowa świadczenia w złotych, gdy świadczenie nie jest wyrażone "
+            "jako procent podstawy wymiaru (np. zasiłek pogrzebowy przy martwym "
+            "urodzeniu). Null, gdy obowiązuje rate_percentage."
+        ),
     )
     institution: str = Field(description="Instytucja, do której składa się wniosek (np. ZUS).")
     required_documents: list[RequiredDocument] = Field(

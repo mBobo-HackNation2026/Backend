@@ -128,7 +128,7 @@ def test_ensure_seeded_creates_paternity_leave_rule() -> None:
         db.close()
 
 
-def test_ensure_seeded_creates_all_stub_benefit_rules() -> None:
+def test_ensure_seeded_creates_stillbirth_funeral_benefit_rule_with_lump_sum() -> None:
     from app.rules.seed import STILLBIRTH_FUNERAL_BENEFIT_CODE
 
     db = SessionLocal()
@@ -136,17 +136,18 @@ def test_ensure_seeded_creates_all_stub_benefit_rules() -> None:
         ensure_seeded(db)
         ensure_seeded(db)  # must be idempotent
 
-        stub_codes = [
-            STILLBIRTH_FUNERAL_BENEFIT_CODE,
-        ]
-        for code in stub_codes:
-            rule = (
-                db.query(BenefitRuleVersion)
-                .join(BenefitType)
-                .filter(BenefitType.code == code, BenefitRuleVersion.is_current.is_(True))
-                .one()
+        rule = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == STILLBIRTH_FUNERAL_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
             )
-            assert rule is not None, code
+            .one()
+        )
+
+        assert rule.lump_sum_amount_zl == Decimal("7000.00")
+        assert rule.weeks_by_child_count is None
     finally:
         db.close()
 

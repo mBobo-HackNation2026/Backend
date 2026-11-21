@@ -19,22 +19,6 @@ PATERNITY_LEAVE_BENEFIT_CODE = "urlop_ojcowski"
 PATERNITY_LEAVE_BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu ojcowskiego"
 REHABILITATION_BENEFIT_CODE = "swiadczenie_rehabilitacyjne"
 REHABILITATION_BENEFIT_NAME = "Świadczenie rehabilitacyjne"
-
-# --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These three benefit codes are registered and return a real HTTP 200 response so the
-# frontend can build UI around a stable API shape, but their eligibility evaluators
-# (app/eligibility/engine.py) are placeholders: they always return the same static
-# `requires_verification` result regardless of input, with a `warnings` entry saying so
-# explicitly. REAL per-request eligibility logic for these three is tracked as outstanding
-# work - see project memory `project-ebobo-stub-benefits-debt` - and must be implemented
-# (with the usual TDD + review process) before these are anything more than a UI
-# placeholder. Do not remove the "TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA" warning without
-# actually implementing the real logic first.
-#
-# urlop_rodzicielski (parental leave) and zasilek_chorobowy_w_ciazy (sickness during
-# pregnancy) USED to be in this list but now have real evaluators and dedicated seed
-# functions (_ensure_parental_leave_seeded / _ensure_sickness_during_pregnancy_seeded
-# below) - see app/eligibility/engine.py.
 SICKNESS_DURING_PREGNANCY_BENEFIT_CODE = "zasilek_chorobowy_w_ciazy"
 SICKNESS_DURING_PREGNANCY_BENEFIT_NAME = "Zasiłek chorobowy w ciąży"
 SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE = "uzupelniajacy_urlop_macierzynski"
@@ -58,18 +42,7 @@ def ensure_seeded(db: Session) -> None:
     _ensure_supplementary_maternity_leave_seeded(db)
     _ensure_parental_leave_seeded(db)
     _ensure_adoption_leave_seeded(db)
-    _ensure_stub_benefit_seeded(
-        db,
-        code=STILLBIRTH_FUNERAL_BENEFIT_CODE,
-        name=STILLBIRTH_FUNERAL_BENEFIT_NAME,
-        description=(
-            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: "
-            "świadczenie ryczałtowe 7 000 zł niezależnie od faktycznych kosztów (nie "
-            "procent podstawy wymiaru), wniosek na formularzu Z-12 w ciągu 12 miesięcy "
-            "od pochówku (Poradnik ZUS 2026, s.35-36) - ten model danych (rate_percentage "
-            "+ weeks) nie pasuje do świadczenia kwotowego i będzie wymagał rozszerzenia."
-        ),
-    )
+    _ensure_stillbirth_funeral_benefit_seeded(db)
 
 
 def _ensure_maternity_leave_seeded(db: Session) -> None:
@@ -739,16 +712,20 @@ def _ensure_adoption_leave_seeded(db: Session) -> None:
     db.commit()
 
 
-def _ensure_stub_benefit_seeded(db: Session, *, code: str, name: str, description: str) -> None:
-    """Seeds a minimal, mostly-placeholder rule row for a benefit whose eligibility
-    evaluator is itself a static placeholder (see the STUB BENEFITS note above). The
-    numeric fields here are never actually read by the evaluator - they exist only
-    because BenefitRuleVersion's columns are NOT NULL and get_current_rule needs a row
-    to find, not because they're meaningful figures for this benefit yet.
-    """
-    benefit_type = db.query(BenefitType).filter_by(code=code).one_or_none()
+def _ensure_stillbirth_funeral_benefit_seeded(db: Session) -> None:
+    benefit_type = (
+        db.query(BenefitType).filter_by(code=STILLBIRTH_FUNERAL_BENEFIT_CODE).one_or_none()
+    )
     if benefit_type is None:
-        benefit_type = BenefitType(code=code, name=name, description=description)
+        benefit_type = BenefitType(
+            code=STILLBIRTH_FUNERAL_BENEFIT_CODE,
+            name=STILLBIRTH_FUNERAL_BENEFIT_NAME,
+            description=(
+                "Świadczenie ryczałtowe w razie martwego urodzenia dziecka - 7 000 zł, "
+                "niezależnie od faktycznych kosztów pochówku. Wniosek na formularzu "
+                "Z-12 w ciągu 12 miesięcy od pochówku."
+            ),
+        )
         db.add(benefit_type)
         db.flush()
 
@@ -766,15 +743,48 @@ def _ensure_stub_benefit_seeded(db: Session, *, code: str, name: str, descriptio
         is_current=True,
         effective_from=date(2026, 1, 1),
         effective_to=None,
+        # To świadczenie jest kwotą ryczałtową, nie procentem podstawy wymiaru -
+        # rate_percentage=0.00 to tylko placeholder spełniający ograniczenie NOT NULL
+        # kolumny; silnik (evaluate_stillbirth_funeral_benefit_eligibility) prezentuje
+        # lump_sum_amount_zl zamiast rate_percentage w odpowiedzi (BenefitPlan).
         rate_percentage=Decimal("0.00"),
+        lump_sum_amount_zl=Decimal("7000.00"),
         weeks_by_child_count=None,
         duration_until_birth=False,
         debt_threshold_percent_of_min_wage=Decimal("1.00"),
         min_wage_reference_zl=Decimal("4806.00"),
         institution="ZUS",
-        legal_basis=[description],
-        deadlines=[],
-        required_documents=[],
+        deadlines=[
+            "Wniosek Z-12 - w ciągu 12 miesięcy od dnia pochówku; po tym terminie prawo "
+            "do świadczenia wygasa (Poradnik ZUS 2026, s.35-36).",
+        ],
+        legal_basis=[
+            "Poradnik ZUS 2026 (zasiłek pogrzebowy w razie martwego urodzenia dziecka - "
+            "7 000 zł ryczałtu, formularz Z-12, 12 miesięcy od pochówku)",
+        ],
+        required_documents=[
+            {
+                "code": "wniosek_z12",
+                "name": "Wniosek Z-12 o zasiłek pogrzebowy",
+                "when": "w ciągu 12 miesięcy od pochówku",
+                "applies_to": None,
+            },
+            {
+                "code": "rachunki_kosztow_pochowku",
+                "name": "Rachunki potwierdzające koszty pochówku",
+                "when": "wraz z wnioskiem",
+                "applies_to": None,
+            },
+            {
+                "code": "akt_martwego_urodzenia",
+                "name": (
+                    "Zaświadczenie o martwym urodzeniu (gdy brak adnotacji w akcie "
+                    "urodzenia)"
+                ),
+                "when": "wraz z wnioskiem, jeśli dotyczy",
+                "applies_to": None,
+            },
+        ],
     )
     db.add(rule)
     db.commit()

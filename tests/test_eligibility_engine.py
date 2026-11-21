@@ -12,6 +12,7 @@ from app.eligibility.engine import (
     evaluate_paternity_leave_eligibility,
     evaluate_rehabilitation_benefit_eligibility,
     evaluate_sickness_benefit_during_pregnancy_eligibility,
+    evaluate_stillbirth_funeral_benefit_eligibility,
     evaluate_supplementary_maternity_leave_eligibility,
 )
 from app.eligibility.schemas import (
@@ -1190,3 +1191,78 @@ def test_adoption_leave_requires_verification_when_adoption_flag_missing() -> No
 
     assert result.status == EligibilityStatus.requires_verification
     assert result.plan is not None
+
+
+def _make_stillbirth_funeral_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("0.00"),
+        lump_sum_amount_zl=Decimal("7000.00"),
+        weeks_by_child_count=None,
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="ZUS",
+        legal_basis=["Poradnik ZUS 2026"],
+        deadlines=["W ciągu 12 miesięcy od pochówku"],
+        required_documents=[
+            {"code": "wniosek_z12", "name": "Wniosek Z-12", "when": "...", "applies_to": None},
+        ],
+    )
+
+
+def test_stillbirth_funeral_benefit_likely_eligible_within_deadline() -> None:
+    rule = _make_stillbirth_funeral_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_stillbirth_or_infant_death=True,
+        days_since_death=30,
+    )
+
+    result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks is None
+    assert result.plan.rate_percentage is None
+    assert result.plan.lump_sum_amount_zl == Decimal("7000.00")
+
+
+def test_stillbirth_funeral_benefit_not_eligible_past_12_month_deadline() -> None:
+    rule = _make_stillbirth_funeral_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_stillbirth_or_infant_death=True,
+        days_since_death=400,
+    )
+
+    result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_stillbirth_funeral_benefit_not_eligible_without_stillbirth() -> None:
+    rule = _make_stillbirth_funeral_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_stillbirth_or_infant_death=False,
+        days_since_death=10,
+    )
+
+    result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_stillbirth_funeral_benefit_requires_verification_when_fields_missing() -> None:
+    rule = _make_stillbirth_funeral_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1)
+
+    result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert len(result.missing_data) == 2

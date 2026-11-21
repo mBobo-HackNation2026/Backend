@@ -1154,54 +1154,105 @@ def evaluate_adoption_leave_eligibility(
     )
 
 
-# --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# This evaluator (stillbirth funeral benefit) always returns the same static result
-# regardless of input. It exists so the frontend can build UI against a stable API
-# shape before the real eligibility logic is written (explicit product decision - see
-# project memory `project-ebobo-stub-benefits-debt`). Its `warnings` entry says so
-# plainly; `status` is deliberately always `requires_verification`, never
-# `likely_eligible`, so a stub can never falsely tell a real user they qualify for
-# something nobody has actually evaluated. Parental leave (urlop rodzicielski),
-# sickness benefit during pregnancy (zasiłek chorobowy w ciąży), supplementary
-# maternity leave (uzupełniający urlop macierzyński) and adoption/foster care leave
-# (urlop na warunkach urlopu macierzyńskiego) used to be in this group - see
-# evaluate_parental_leave_eligibility, evaluate_sickness_benefit_during_pregnancy_eligibility,
-# evaluate_supplementary_maternity_leave_eligibility and evaluate_adoption_leave_eligibility
-# above for their real logic.
-def _static_placeholder_result(
-    benefit_code: str, benefit_name: str, rule: BenefitRuleVersion, todo_note: str
-) -> EligibilityResult:
-    return EligibilityResult(
-        benefit_code=benefit_code,
-        benefit_name=benefit_name,
-        status=EligibilityStatus.requires_verification,
-        met_conditions=[],
-        unmet_conditions=[],
-        missing_data=["ocena merytoryczna dla tego świadczenia nie jest jeszcze zaimplementowana"],
-        possible_solutions=[],
-        plan=None,
-        rules_version=rule.version,
-        warnings=[
-            "TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA: logika oceny uprawnień dla tego świadczenia "
-            "nie została jeszcze zaimplementowana - status jest stały niezależnie od "
-            "podanych danych i służy wyłącznie do budowy widoków frontendowych, nie do "
-            f"realnej oceny uprawnień. {todo_note}"
-        ],
+
+
+_STILLBIRTH_FUNERAL_DEADLINE_DAYS = 365
+
+
+def _build_stillbirth_funeral_benefit_plan(
+    rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest
+) -> BenefitPlan:
+    is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+    required_documents = [
+        RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+        for doc in rule.required_documents
+        if _document_applies(doc, is_self_employed)
+    ]
+    return BenefitPlan(
+        weeks=None,
+        duration_description=None,
+        rate_percentage=None,
+        lump_sum_amount_zl=rule.lump_sum_amount_zl,
+        institution=rule.institution,
+        required_documents=required_documents,
+        deadlines=list(rule.deadlines),
+        legal_basis=list(rule.legal_basis),
     )
-
-
-
-
 
 
 def evaluate_stillbirth_funeral_benefit_eligibility(
     request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
 ) -> EligibilityResult:
-    return _static_placeholder_result(
-        STILLBIRTH_FUNERAL_BENEFIT_CODE,
-        STILLBIRTH_FUNERAL_BENEFIT_NAME,
-        rule,
-        "Docelowo: świadczenie ryczałtowe 7 000 zł (nie procent podstawy wymiaru), "
-        "wniosek Z-12 w ciągu 12 miesięcy od pochówku - wymaga rozszerzenia modelu "
-        "danych o kwotę ryczałtową.",
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    if request.is_stillbirth_or_infant_death is None:
+        missing_data.append("czy doszło do martwego urodzenia dziecka")
+    elif request.is_stillbirth_or_infant_death:
+        met_conditions.append(
+            "martwe urodzenie dziecka (Poradnik ZUS 2026, zasiłek pogrzebowy formularz Z-12)"
+        )
+        warnings.append(
+            "To pole obejmuje też zgon dziecka przed ukończeniem 8. tygodnia życia po "
+            "żywym urodzeniu - ten silnik ocenia wyłącznie ścieżkę martwego urodzenia "
+            "(formularz Z-12); zgon po żywym urodzeniu może wymagać innej procedury "
+            "zasiłku pogrzebowego, która nie jest tu modelowana."
+        )
+    else:
+        unmet_conditions.append("brak martwego urodzenia dziecka - świadczenie nie dotyczy")
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "To świadczenie dotyczy wyłącznie martwego urodzenia dziecka "
+                    "(formularz Z-12). Zwykły zgon wymaga standardowego zasiłku "
+                    "pogrzebowego, który nie jest jeszcze modelowany w tym silniku."
+                ),
+            )
+        )
+
+    if request.days_since_death is None:
+        missing_data.append("liczba dni, które upłynęły od zgonu/martwego urodzenia")
+    elif request.days_since_death > _STILLBIRTH_FUNERAL_DEADLINE_DAYS:
+        unmet_conditions.append(
+            f"minęło więcej niż {_STILLBIRTH_FUNERAL_DEADLINE_DAYS} dni (12 miesięcy) od "
+            "pochówku - termin na złożenie wniosku Z-12 wygasł"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.limitation,
+                description=(
+                    "Wniosek o zasiłek pogrzebowy (Z-12) trzeba złożyć w ciągu 12 "
+                    "miesięcy od pochówku - po tym terminie prawo do świadczenia wygasa."
+                ),
+            )
+        )
+    else:
+        met_conditions.append(
+            f"termin 12 miesięcy od pochówku nie minął ({request.days_since_death} dni)"
+        )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    plan = (
+        _build_stillbirth_funeral_benefit_plan(rule, request) if is_standard_path_open else None
+    )
+
+    return EligibilityResult(
+        benefit_code=STILLBIRTH_FUNERAL_BENEFIT_CODE,
+        benefit_name=STILLBIRTH_FUNERAL_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
     )

@@ -89,7 +89,7 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     nie jest jeszcze rozbijany miesiąc po miesiącu - to zadanie przyszłego
     kalkulatora (priorytet #3). Zob. `app/eligibility/engine.py` →
     `evaluate_rehabilitation_benefit_eligibility`.
-  - `uzupelniajacy_urlop_macierzynski` — **nowość**: uzupełniający urlop
+  - `uzupelniajacy_urlop_macierzynski` — uzupełniający urlop
     macierzyński (hospitalizacja dziecka po porodzie), 1 tydzień urlopu za
     każdy tydzień hospitalizacji (`child_hospitalization_weeks`), 100%
     podstawy. Graniczny termin skorzystania to 15. tydzień po porodzie przy
@@ -101,7 +101,7 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     późniejszą hospitalizacją) nie jest jeszcze modelowany. Zob.
     `app/eligibility/engine.py` →
     `evaluate_supplementary_maternity_leave_eligibility`.
-  - `urlop_na_warunkach_urlopu_macierzynskiego` — **nowość**: adopcja/rodzina
+  - `urlop_na_warunkach_urlopu_macierzynskiego` — adopcja/rodzina
     zastępcza, ta sama tabela tygodni co zasiłek macierzyński (20/31/33/35/37),
     100% podstawy. `is_adoption_or_foster_care` ustala czy to w ogóle dotyczy
     tego świadczenia (w przeciwnym razie wskazuje zwykły zasiłek
@@ -112,25 +112,29 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     jeszcze gwarancji minimum 9 tygodni przy adopcji dziecka bliskiego granicy
     wiekowej - sygnalizuje to przez `warnings`. Zob.
     `app/eligibility/engine.py` → `evaluate_adoption_leave_eligibility`.
+  - `zasilek_pogrzebowy_martwe_urodzenie` — **nowość, ostatnie z 9 świadczeń
+    Fazy 2 - zamyka cały dług `project-ebobo-stub-benefits-debt`**: świadczenie
+    ryczałtowe 7 000 zł (nie procent podstawy wymiaru), wniosek Z-12 w ciągu
+    12 miesięcy od pochówku. Wymagało rozszerzenia modelu danych: nowe pole
+    `lump_sum_amount_zl` na `BenefitRuleVersion` i `BenefitPlan`, a
+    `rate_percentage` w `BenefitPlan` stało się opcjonalne (null dla
+    świadczeń kwotowych). Gatuje przez `is_stillbirth_or_infant_death` i
+    12-miesięczny termin (`days_since_death`); jawne ostrzeżenie, że to pole
+    obejmuje też zgon dziecka po żywym urodzeniu przed 8. tygodniem życia,
+    którego ten silnik nie rozróżnia od martwego urodzenia. Zob.
+    `app/eligibility/engine.py` →
+    `evaluate_stillbirth_funeral_benefit_eligibility`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 
 ### W trakcie / tymczasowe
 
-**1 świadczenie zarejestrowane jako placeholder** — odpowiada `200 OK`, ale bez
-realnej logiki oceny: zawsze zwraca `status: requires_verification` z jawnym
-ostrzeżeniem `"TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA"` w `warnings` i `plan: null`,
-nigdy fałszywe `likely_eligible` — zrobione celowo, żeby front mógł budować
-widoki na stabilnym kształcie API, zanim dojedzie realna logika. Szczegóły
-parametrów prawnych w `app/eligibility/engine.py` i pamięci projektu
-`project-ebobo-stub-benefits-debt`:
-
-| Kod świadczenia | Co to jest |
-|---|---|
-| `zasilek_pogrzebowy_martwe_urodzenie` | Zasiłek pogrzebowy przy martwym urodzeniu (kwota ryczałtowa, wymaga rozszerzenia schematu `BenefitRuleVersion`) |
-
-Traktuj prośbę "dokończ Fazę 2" / "dopracuj świadczenia" jako niekompletną,
-dopóki ten ostatni kod nie przestanie być statyczny.
+**Brak placeholderów** — wszystkie 9 świadczeń Fazy 2 mają teraz realną
+logikę oceny (zob. listę wyżej). Dług `project-ebobo-stub-benefits-debt` jest
+zamknięty, ale kilka świadomych uproszczeń pozostaje nieobsłużonych (patrz
+notatki "Świadomie NIE modeluje" przy poszczególnych świadczeniach wyżej oraz
+pamięć projektu dla pełnej listy) - nie traktuj "wszystkie świadczenia realne"
+jako "każdy niuans prawny jest pokryty".
 
 ### Co zostało (priorytety, reset 2026-11-21)
 
@@ -167,7 +171,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | # | Zakres | Status |
 |---|---|---|
 | 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ✅ zrobione (schemat w `app/eligibility/schemas.py`, patrz "Zrobione" wyżej) |
-| 2 | Dopracowanie silnika uprawnień, w kolejności: ✅ urlop rodzicielski (+ podział między rodzicami), ✅ zasiłek chorobowy w ciąży, ✅ świadczenie rehabilitacyjne (nowe świadczenie, 90%/75%/100% w ciąży, max 12 mies.), ✅ uzupełniający urlop macierzyński, ✅ adopcja/rodzina zastępcza, zasiłek pogrzebowy przy martwym urodzeniu | 🟡 8 zrobionych, 1 placeholder (patrz wyżej) |
+| 2 | Dopracowanie silnika uprawnień (urlop rodzicielski, zasiłek chorobowy w ciąży, świadczenie rehabilitacyjne - nowe świadczenie, uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, zasiłek pogrzebowy przy martwym urodzeniu) | ✅ zrobione - wszystkie 9 świadczeń mają realną logikę, patrz "Zrobione" wyżej |
 | 2a | **Jawne oznaczenie statusu implementacji** (implemented/stub) w odpowiedzi API — placeholdery dziś zwracają `HTTP 200` z ostrzeżeniem tylko w tekście; FE potrzebuje pola, które da się odczytać programistycznie | ⬜ nierozpoczęte |
 | 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ⬜ nierozpoczęte |
 | 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |

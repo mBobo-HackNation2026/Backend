@@ -74,6 +74,11 @@ class BenefitRuleVersion(Base):
     effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     rate_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    # Dotyczy świadczeń wyrażonych jako stała kwota, nie procent podstawy wymiaru (np.
+    # zasiłek pogrzebowy przy martwym urodzeniu - flat 7000 zł). Gdy wypełnione, silnik
+    # ignoruje rate_percentage w odpowiedzi (BenefitPlan.rate_percentage=None) i
+    # prezentuje tę kwotę zamiast stawki. Null dla pozostałych świadczeń.
+    lump_sum_amount_zl: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     weeks_by_child_count: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Dotyczy wyłącznie urlopu rodzicielskiego: wydłużony wymiar (65/67 zamiast 41/43
     # tygodni), gdy dziecko ma zaświadczenie "Za życiem" (ustawa zasiłkowa art. 31 ust. 3).

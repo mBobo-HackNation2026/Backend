@@ -45,7 +45,5 @@ ELIGIBILITY_EVALUATORS: dict[str, EligibilityEvaluator] = {
     REHABILITATION_BENEFIT_CODE: evaluate_rehabilitation_benefit_eligibility,
     SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE: evaluate_supplementary_maternity_leave_eligibility,
     ADOPTION_LEAVE_BENEFIT_CODE: evaluate_adoption_leave_eligibility,
-    # Stub (Faza 2, not yet implemented - see app/eligibility/engine.py's
-    # "STUB BENEFITS" note and project memory `project-ebobo-stub-benefits-debt`):
     STILLBIRTH_FUNERAL_BENEFIT_CODE: evaluate_stillbirth_funeral_benefit_eligibility,
 }

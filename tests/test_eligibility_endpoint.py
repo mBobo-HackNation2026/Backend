@@ -8,9 +8,7 @@ SICKNESS_DURING_PREGNANCY_CODE = "zasilek_chorobowy_w_ciazy"
 REHABILITATION_BENEFIT_CODE = "swiadczenie_rehabilitacyjne"
 SUPPLEMENTARY_MATERNITY_LEAVE_CODE = "uzupelniajacy_urlop_macierzynski"
 ADOPTION_LEAVE_CODE = "urlop_na_warunkach_urlopu_macierzynskiego"
-STUB_BENEFIT_CODES = [
-    "zasilek_pogrzebowy_martwe_urodzenie",
-]
+STILLBIRTH_FUNERAL_CODE = "zasilek_pogrzebowy_martwe_urodzenie"
 
 
 def test_check_eligibility_returns_likely_eligible_for_insured_mother(client: TestClient) -> None:
@@ -388,21 +386,38 @@ def test_check_eligibility_accepts_full_expanded_request_schema(client: TestClie
     assert response.json()["benefit_code"] == PATERNITY_LEAVE_CODE
 
 
-def test_stub_benefits_are_registered_and_return_requires_verification(
+def test_check_eligibility_stillbirth_funeral_benefit_likely_eligible(
     client: TestClient,
 ) -> None:
-    """Each Phase 2 stub benefit must be reachable and honest about being a
-    placeholder (requires_verification, never likely_eligible, with an explicit
-    warning) - never a silent fake 'yes'."""
-    for code in STUB_BENEFIT_CODES:
-        response = client.post(
-            f"/api/v1/eligibility/check/{code}",
-            json={"children_count": 1, "insured_at_birth": True},
-        )
+    response = client.post(
+        f"/api/v1/eligibility/check/{STILLBIRTH_FUNERAL_CODE}",
+        json={
+            "children_count": 1,
+            "is_stillbirth_or_infant_death": True,
+            "days_since_death": 30,
+        },
+    )
 
-        assert response.status_code == 200, code
-        body = response.json()
-        assert body["status"] == "requires_verification", code
-        assert body["plan"] is None, code
-        assert body["benefit_code"] == code
-        assert any("TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA" in w for w in body["warnings"]), code
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert body["plan"]["rate_percentage"] is None
+    assert body["plan"]["lump_sum_amount_zl"] == "7000.00"
+
+
+def test_check_eligibility_stillbirth_funeral_benefit_deadline_passed(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{STILLBIRTH_FUNERAL_CODE}",
+        json={
+            "children_count": 1,
+            "is_stillbirth_or_infant_death": True,
+            "days_since_death": 400,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_eligible"
+    assert body["plan"] is None
