@@ -5,6 +5,7 @@ from app.db.models.benefit_rule import BenefitRuleVersion
 from app.eligibility.engine import (
     ALTERNATIVE_BENEFIT_CODE,
     BENEFIT_CODE,
+    evaluate_adoption_leave_eligibility,
     evaluate_alternative_maternity_benefit_eligibility,
     evaluate_maternity_leave_eligibility,
     evaluate_parental_leave_eligibility,
@@ -16,6 +17,7 @@ from app.eligibility.engine import (
 from app.eligibility.schemas import (
     EligibilityStatus,
     EmploymentEndedReason,
+    FosterCareType,
     InsuranceTitle,
     MaternityLeaveEligibilityRequest,
     SolutionType,
@@ -1061,3 +1063,130 @@ def test_supplementary_leave_requires_verification_when_hospitalization_weeks_mi
     assert result.status == EligibilityStatus.requires_verification
     assert any("pobytu dziecka w szpitalu" in m for m in result.missing_data)
     assert result.plan is None
+
+
+def _make_adoption_leave_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="Pracodawca albo ZUS",
+        legal_basis=["Kodeks pracy art. 183"],
+        deadlines=["Przed rozpoczęciem korzystania z urlopu"],
+        required_documents=[
+            {"code": "wniosek", "name": "Wniosek", "when": "...", "applies_to": None},
+        ],
+    )
+
+
+def test_adoption_leave_likely_eligible_for_adoption_petition() -> None:
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_adoption_or_foster_care=True,
+        foster_care_type=FosterCareType.wniosek_o_przysposobienie,
+        child_age_years=10,
+    )
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 20
+
+
+def test_adoption_leave_not_eligible_past_14_for_adoption_petition() -> None:
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_adoption_or_foster_care=True,
+        foster_care_type=FosterCareType.wniosek_o_przysposobienie,
+        child_age_years=14,
+    )
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_adoption_leave_foster_care_age_limit_is_7_without_deferral() -> None:
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_adoption_or_foster_care=True,
+        foster_care_type=FosterCareType.rodzina_zastepcza,
+        school_obligation_deferred=False,
+        child_age_years=7,
+    )
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_adoption_leave_foster_care_age_limit_extends_to_10_with_deferral() -> None:
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_adoption_or_foster_care=True,
+        foster_care_type=FosterCareType.rodzina_zastepcza,
+        school_obligation_deferred=True,
+        child_age_years=9,
+    )
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+
+
+def test_adoption_leave_not_eligible_for_professional_foster_family() -> None:
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_adoption_or_foster_care=True,
+        foster_care_type=FosterCareType.rodzina_zastepcza_zawodowa,
+        child_age_years=3,
+    )
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.not_eligible
+    assert result.plan is None
+
+
+def test_adoption_leave_points_to_standard_benefit_when_not_adoption_or_foster_care() -> None:
+    """unmet + an alternative_benefit solution = requires_verification (same
+    confirm-the-alternative-separately convention as the other evaluators), not a
+    flat not_eligible."""
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_adoption_or_foster_care=False,
+    )
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.plan is None
+    assert any(
+        s.type == SolutionType.alternative_benefit and s.related_benefit_code == BENEFIT_CODE
+        for s in result.possible_solutions
+    )
+
+
+def test_adoption_leave_requires_verification_when_adoption_flag_missing() -> None:
+    """Nothing confirmed as unmet yet (just missing data) - the standard path is
+    still open, so a plan is still shown, same convention as the other evaluators."""
+    rule = _make_adoption_leave_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1)
+
+    result = evaluate_adoption_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.plan is not None

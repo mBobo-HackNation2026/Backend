@@ -57,17 +57,7 @@ def ensure_seeded(db: Session) -> None:
     _ensure_rehabilitation_benefit_seeded(db)
     _ensure_supplementary_maternity_leave_seeded(db)
     _ensure_parental_leave_seeded(db)
-    _ensure_stub_benefit_seeded(
-        db,
-        code=ADOPTION_LEAVE_BENEFIT_CODE,
-        name=ADOPTION_LEAVE_BENEFIT_NAME,
-        description=(
-            "[PLACEHOLDER - logika oceny jeszcze niezaimplementowana] Docelowo: ta sama "
-            "tabela 20/31/33/35/37 tygodni co zasiłek macierzyński, min. 9 tygodni, 100% "
-            "podstawy; limity wieku: rodzina zastępcza do 7 lat dziecka (10 lat przy "
-            "odroczeniu obowiązku szkolnego), wniosek o przysposobienie do 14 lat dziecka."
-        ),
-    )
+    _ensure_adoption_leave_seeded(db)
     _ensure_stub_benefit_seeded(
         db,
         code=STILLBIRTH_FUNERAL_BENEFIT_CODE,
@@ -652,6 +642,88 @@ def _ensure_supplementary_maternity_leave_seeded(db: Session) -> None:
             {
                 "code": "zaswiadczenie_szpitalne",
                 "name": "Zaświadczenie szpitalne potwierdzające okres hospitalizacji dziecka",
+                "when": "wraz z wnioskiem",
+                "applies_to": None,
+            },
+            {
+                "code": "zaswiadczenie_z3",
+                "name": "Zaświadczenie płatnika składek Z-3",
+                "when": "gdy płatnikiem zasiłku jest ZUS, a nie pracodawca",
+                "applies_to": "standard",
+            },
+        ],
+    )
+    db.add(rule)
+    db.commit()
+
+
+def _ensure_adoption_leave_seeded(db: Session) -> None:
+    benefit_type = db.query(BenefitType).filter_by(code=ADOPTION_LEAVE_BENEFIT_CODE).one_or_none()
+    if benefit_type is None:
+        benefit_type = BenefitType(
+            code=ADOPTION_LEAVE_BENEFIT_CODE,
+            name=ADOPTION_LEAVE_BENEFIT_NAME,
+            description=(
+                "Świadczenie za okres urlopu na warunkach urlopu macierzyńskiego - "
+                "przysługuje przy przysposobieniu dziecka (do 14 lat) albo przyjęciu "
+                "dziecka do rodziny zastępczej, innej niż zawodowa (do 7 lat, albo 10 "
+                "lat przy odroczeniu obowiązku szkolnego). Ta sama tabela tygodni co "
+                "zasiłek macierzyński, 100% podstawy wymiaru."
+            ),
+        )
+        db.add(benefit_type)
+        db.flush()
+
+    existing_rule = (
+        db.query(BenefitRuleVersion)
+        .filter_by(benefit_type_id=benefit_type.id, is_current=True)
+        .one_or_none()
+    )
+    if existing_rule is not None:
+        return
+
+    rule = BenefitRuleVersion(
+        benefit_type_id=benefit_type.id,
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution=(
+            "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
+            "chorobowego) albo ZUS"
+        ),
+        deadlines=[
+            "Wniosek o urlop na warunkach urlopu macierzyńskiego - przed rozpoczęciem "
+            "korzystania z urlopu, w ciągu 14 lat życia dziecka (przysposobienie) albo "
+            "do 7/10 lat (rodzina zastępcza).",
+        ],
+        legal_basis=[
+            "Kodeks pracy art. 183 §1 (urlop na warunkach urlopu macierzyńskiego - "
+            "przysposobienie do 14 lat dziecka, rodzina zastępcza do 7 lat, 10 lat przy "
+            "odroczeniu obowiązku szkolnego)",
+            "Kodeks pracy art. 183 §1(1) (rodzina zastępcza zawodowa wyłączona z prawa "
+            "do tego urlopu)",
+            "ustawa zasiłkowa art. 29 ust. 1 pkt 1 i art. 31 ust. 1 (100% podstawy "
+            "wymiaru, jak zwykły zasiłek macierzyński)",
+            "ustawa zasiłkowa art. 2a (wyłączenie prawa z powodu zadłużenia składkowego)",
+        ],
+        required_documents=[
+            {
+                "code": "wniosek_urlop_na_warunkach_urlopu_macierzynskiego",
+                "name": "Wniosek o udzielenie urlopu na warunkach urlopu macierzyńskiego",
+                "when": "przed rozpoczęciem korzystania z urlopu",
+                "applies_to": None,
+            },
+            {
+                "code": "dokument_przysposobienia_lub_rodziny_zastepczej",
+                "name": (
+                    "Dokument potwierdzający przysposobienie dziecka albo przyjęcie do "
+                    "rodziny zastępczej (np. postanowienie sądu)"
+                ),
                 "when": "wraz z wnioskiem",
                 "applies_to": None,
             },

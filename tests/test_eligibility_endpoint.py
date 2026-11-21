@@ -7,8 +7,8 @@ PARENTAL_LEAVE_CODE = "urlop_rodzicielski"
 SICKNESS_DURING_PREGNANCY_CODE = "zasilek_chorobowy_w_ciazy"
 REHABILITATION_BENEFIT_CODE = "swiadczenie_rehabilitacyjne"
 SUPPLEMENTARY_MATERNITY_LEAVE_CODE = "uzupelniajacy_urlop_macierzynski"
+ADOPTION_LEAVE_CODE = "urlop_na_warunkach_urlopu_macierzynskiego"
 STUB_BENEFIT_CODES = [
-    "urlop_na_warunkach_urlopu_macierzynskiego",
     "zasilek_pogrzebowy_martwe_urodzenie",
 ]
 
@@ -301,6 +301,43 @@ def test_check_eligibility_supplementary_maternity_leave_deadline_passed(
             "gestational_week_at_birth": 30,
             "birth_weight_grams": 1800,
             "postpartum_weeks_elapsed": 9,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_eligible"
+    assert body["plan"] is None
+
+
+def test_check_eligibility_adoption_leave_likely_eligible(client: TestClient) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{ADOPTION_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "is_adoption_or_foster_care": True,
+            "foster_care_type": "wniosek_o_przysposobienie",
+            "child_age_years": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert body["plan"]["weeks"] == 20
+    assert body["plan"]["rate_percentage"] == "100.00"
+
+
+def test_check_eligibility_adoption_leave_not_eligible_for_professional_foster_family(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/api/v1/eligibility/check/{ADOPTION_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "is_adoption_or_foster_care": True,
+            "foster_care_type": "rodzina_zastepcza_zawodowa",
+            "child_age_years": 3,
         },
     )
 

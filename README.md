@@ -45,7 +45,7 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   dobrowolnej, rodzaj premii, przerwa między zasiłkami). Front może budować
   pełną ankietę na tym kontrakcie już teraz - większość pól nie ma jeszcze
   logiki po stronie silnika (patrz sekcja "W trakcie" niżej).
-- **7 świadczeń w pełni zaimplementowane** (realna logika oceny):
+- **8 świadczeń w pełni zaimplementowane** (realna logika oceny):
   - `zasilek_macierzynski_urlop_macierzynski` — zasiłek macierzyński za okres
     urlopu macierzyńskiego.
   - `zasilek_w_wysokosci_zasilku_macierzynskiego` — alternatywna ścieżka z
@@ -101,26 +101,36 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     późniejszą hospitalizacją) nie jest jeszcze modelowany. Zob.
     `app/eligibility/engine.py` →
     `evaluate_supplementary_maternity_leave_eligibility`.
+  - `urlop_na_warunkach_urlopu_macierzynskiego` — **nowość**: adopcja/rodzina
+    zastępcza, ta sama tabela tygodni co zasiłek macierzyński (20/31/33/35/37),
+    100% podstawy. `is_adoption_or_foster_care` ustala czy to w ogóle dotyczy
+    tego świadczenia (w przeciwnym razie wskazuje zwykły zasiłek
+    macierzyński); `foster_care_type` odrzuca rodzinę zastępczą zawodową
+    (Kodeks pracy art. 183 §1(1)) i ustala limit wieku: 14 lat przy
+    przysposobieniu, 7 lat przy rodzinie zastępczej (10 lat przy odroczeniu
+    obowiązku szkolnego, `school_obligation_deferred`). Świadomie NIE modeluje
+    jeszcze gwarancji minimum 9 tygodni przy adopcji dziecka bliskiego granicy
+    wiekowej - sygnalizuje to przez `warnings`. Zob.
+    `app/eligibility/engine.py` → `evaluate_adoption_leave_eligibility`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 
 ### W trakcie / tymczasowe
 
-**2 świadczenia zarejestrowane jako placeholdery** — odpowiadają `200 OK`, ale bez
-realnej logiki oceny: zawsze zwracają `status: requires_verification` z jawnym
+**1 świadczenie zarejestrowane jako placeholder** — odpowiada `200 OK`, ale bez
+realnej logiki oceny: zawsze zwraca `status: requires_verification` z jawnym
 ostrzeżeniem `"TYMCZASOWA ODPOWIEDŹ ZASTĘPCZA"` w `warnings` i `plan: null`,
 nigdy fałszywe `likely_eligible` — zrobione celowo, żeby front mógł budować
 widoki na stabilnym kształcie API, zanim dojedzie realna logika. Szczegóły
-parametrów prawnych dla każdego w `app/eligibility/engine.py` i pamięci
-projektu `project-ebobo-stub-benefits-debt`:
+parametrów prawnych w `app/eligibility/engine.py` i pamięci projektu
+`project-ebobo-stub-benefits-debt`:
 
 | Kod świadczenia | Co to jest |
 |---|---|
-| `urlop_na_warunkach_urlopu_macierzynskiego` | Adopcja / rodzina zastępcza |
 | `zasilek_pogrzebowy_martwe_urodzenie` | Zasiłek pogrzebowy przy martwym urodzeniu (kwota ryczałtowa, wymaga rozszerzenia schematu `BenefitRuleVersion`) |
 
 Traktuj prośbę "dokończ Fazę 2" / "dopracuj świadczenia" jako niekompletną,
-dopóki te 2 kody nie przestaną być statyczne.
+dopóki ten ostatni kod nie przestanie być statyczny.
 
 ### Co zostało (priorytety, reset 2026-11-21)
 
@@ -157,7 +167,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | # | Zakres | Status |
 |---|---|---|
 | 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ✅ zrobione (schemat w `app/eligibility/schemas.py`, patrz "Zrobione" wyżej) |
-| 2 | Dopracowanie silnika uprawnień, w kolejności: ✅ urlop rodzicielski (+ podział między rodzicami), ✅ zasiłek chorobowy w ciąży, ✅ świadczenie rehabilitacyjne (nowe świadczenie, 90%/75%/100% w ciąży, max 12 mies.), ✅ uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, pozostałe sytuacje szczególne | 🟡 7 zrobionych, 2 placeholdery (patrz wyżej) |
+| 2 | Dopracowanie silnika uprawnień, w kolejności: ✅ urlop rodzicielski (+ podział między rodzicami), ✅ zasiłek chorobowy w ciąży, ✅ świadczenie rehabilitacyjne (nowe świadczenie, 90%/75%/100% w ciąży, max 12 mies.), ✅ uzupełniający urlop macierzyński, ✅ adopcja/rodzina zastępcza, zasiłek pogrzebowy przy martwym urodzeniu | 🟡 8 zrobionych, 1 placeholder (patrz wyżej) |
 | 2a | **Jawne oznaczenie statusu implementacji** (implemented/stub) w odpowiedzi API — placeholdery dziś zwracają `HTTP 200` z ostrzeżeniem tylko w tekście; FE potrzebuje pola, które da się odczytać programistycznie | ⬜ nierozpoczęte |
 | 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ⬜ nierozpoczęte |
 | 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |

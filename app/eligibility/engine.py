@@ -12,6 +12,7 @@ from app.eligibility.schemas import (
     EligibilityResult,
     EligibilityStatus,
     EmploymentEndedReason,
+    FosterCareType,
     InsuranceTitle,
     MaternityLeaveEligibilityRequest,
     PossibleSolution,
@@ -1016,19 +1017,157 @@ def evaluate_supplementary_maternity_leave_eligibility(
     )
 
 
+_ADOPTION_LEAVE_FOSTER_CARE_AGE_LIMIT = 7
+_ADOPTION_LEAVE_FOSTER_CARE_DEFERRED_AGE_LIMIT = 10
+_ADOPTION_LEAVE_PETITION_AGE_LIMIT = 14
+
+
+def evaluate_adoption_leave_eligibility(
+    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
+) -> EligibilityResult:
+    met_conditions: list[str] = []
+    unmet_conditions: list[str] = []
+    missing_data: list[str] = []
+    solutions: list[PossibleSolution] = []
+    warnings: list[str] = []
+
+    if request.is_adoption_or_foster_care is None:
+        missing_data.append(
+            "czy wniosek dotyczy przyjęcia dziecka na wychowanie (przysposobienie lub "
+            "rodzina zastępcza)"
+        )
+    elif not request.is_adoption_or_foster_care:
+        unmet_conditions.append(
+            "wniosek nie dotyczy przyjęcia dziecka na wychowanie - to świadczenie "
+            "obejmuje wyłącznie adopcję/rodzinę zastępczą"
+        )
+        solutions.append(
+            PossibleSolution(
+                type=SolutionType.alternative_benefit,
+                description=(
+                    "Bez przysposobienia/rodziny zastępczej właściwym świadczeniem jest "
+                    "zwykły zasiłek macierzyński za okres urlopu macierzyńskiego."
+                ),
+                legal_basis="Kodeks pracy art. 180",
+                related_benefit_code=BENEFIT_CODE,
+            )
+        )
+    else:
+        met_conditions.append(
+            "wniosek dotyczy przyjęcia dziecka na wychowanie (Kodeks pracy art. 183)"
+        )
+
+        age_limit: int | None = None
+        if request.foster_care_type is None:
+            missing_data.append("forma przyjęcia dziecka (przysposobienie/rodzina zastępcza)")
+        elif request.foster_care_type == FosterCareType.rodzina_zastepcza_zawodowa:
+            unmet_conditions.append(
+                "rodzina zastępcza zawodowa nie uprawnia do tego urlopu (Kodeks pracy "
+                "art. 183 §1(1))"
+            )
+            solutions.append(
+                PossibleSolution(
+                    type=SolutionType.limitation,
+                    description=(
+                        "Rodzina zastępcza zawodowa jest wyłączona z prawa do urlopu na "
+                        "warunkach urlopu macierzyńskiego."
+                    ),
+                    legal_basis="Kodeks pracy art. 183 §1(1)",
+                )
+            )
+        elif request.foster_care_type == FosterCareType.wniosek_o_przysposobienie:
+            age_limit = _ADOPTION_LEAVE_PETITION_AGE_LIMIT
+            met_conditions.append(
+                f"przysposobienie - limit wieku dziecka {age_limit} lat (Kodeks pracy "
+                "art. 183 §1)"
+            )
+        else:
+            if request.school_obligation_deferred is None:
+                missing_data.append(
+                    "czy wobec dziecka odroczono obowiązek szkolny (wpływa na limit "
+                    "wieku: 7 albo 10 lat)"
+                )
+            else:
+                age_limit = (
+                    _ADOPTION_LEAVE_FOSTER_CARE_DEFERRED_AGE_LIMIT
+                    if request.school_obligation_deferred
+                    else _ADOPTION_LEAVE_FOSTER_CARE_AGE_LIMIT
+                )
+                met_conditions.append(
+                    f"rodzina zastępcza - limit wieku dziecka {age_limit} lat (Kodeks "
+                    "pracy art. 183 §1)"
+                )
+
+        if request.child_age_years is None:
+            missing_data.append("wiek dziecka w pełnych latach")
+        elif age_limit is not None:
+            if request.child_age_years >= age_limit:
+                unmet_conditions.append(
+                    f"dziecko ukończyło {age_limit} lat - limit wieku dla tej formy "
+                    "przyjęcia na wychowanie został przekroczony (Kodeks pracy art. 183)"
+                )
+                solutions.append(
+                    PossibleSolution(
+                        type=SolutionType.limitation,
+                        description=(
+                            "Po przekroczeniu limitu wieku dziecka prawo do urlopu na "
+                            "warunkach urlopu macierzyńskiego nie przysługuje."
+                        ),
+                        legal_basis="Kodeks pracy art. 183",
+                    )
+                )
+            else:
+                met_conditions.append(
+                    f"dziecko ma {request.child_age_years} lat - poniżej limitu "
+                    f"{age_limit} lat (Kodeks pracy art. 183)"
+                )
+
+    _apply_self_employed_debt_check(
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+    )
+
+    status = _decide_status(missing_data, unmet_conditions, solutions)
+
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    plan = _build_plan(rule, request) if is_standard_path_open else None
+    if plan is not None:
+        warnings.append(
+            "Liczba tygodni pochodzi ze standardowej tabeli wg liczby dzieci - "
+            "gwarancja minimum 9 tygodni przy adopcji dziecka bliskiego granicy "
+            "wiekowej (Kodeks pracy art. 183) nie jest jeszcze uwzględniana osobno, "
+            "zweryfikuj w granicznych przypadkach."
+        )
+
+    return EligibilityResult(
+        benefit_code=ADOPTION_LEAVE_BENEFIT_CODE,
+        benefit_name=ADOPTION_LEAVE_BENEFIT_NAME,
+        status=status,
+        met_conditions=met_conditions,
+        unmet_conditions=unmet_conditions,
+        missing_data=missing_data,
+        possible_solutions=solutions,
+        plan=plan,
+        rules_version=rule.version,
+        warnings=warnings,
+    )
+
+
 # --- STUB BENEFITS (Faza 2, not yet implemented) -----------------------------------
-# These two evaluators (adoption/foster care leave, stillbirth funeral benefit) always
-# return the same static result regardless of input. They exist so the frontend can
-# build UI against a stable API shape before the real eligibility logic is written
-# (explicit product decision - see project memory `project-ebobo-stub-benefits-debt`).
-# Each one's `warnings` entry says so plainly; `status` is deliberately always
-# `requires_verification`, never `likely_eligible`, so a stub can never falsely tell a
-# real user they qualify for something nobody has actually evaluated. Parental leave
-# (urlop rodzicielski), sickness benefit during pregnancy (zasiłek chorobowy w ciąży)
-# and supplementary maternity leave (uzupełniający urlop macierzyński) used to be in
-# this group - see evaluate_parental_leave_eligibility,
-# evaluate_sickness_benefit_during_pregnancy_eligibility and
-# evaluate_supplementary_maternity_leave_eligibility above for their real logic.
+# This evaluator (stillbirth funeral benefit) always returns the same static result
+# regardless of input. It exists so the frontend can build UI against a stable API
+# shape before the real eligibility logic is written (explicit product decision - see
+# project memory `project-ebobo-stub-benefits-debt`). Its `warnings` entry says so
+# plainly; `status` is deliberately always `requires_verification`, never
+# `likely_eligible`, so a stub can never falsely tell a real user they qualify for
+# something nobody has actually evaluated. Parental leave (urlop rodzicielski),
+# sickness benefit during pregnancy (zasiłek chorobowy w ciąży), supplementary
+# maternity leave (uzupełniający urlop macierzyński) and adoption/foster care leave
+# (urlop na warunkach urlopu macierzyńskiego) used to be in this group - see
+# evaluate_parental_leave_eligibility, evaluate_sickness_benefit_during_pregnancy_eligibility,
+# evaluate_supplementary_maternity_leave_eligibility and evaluate_adoption_leave_eligibility
+# above for their real logic.
 def _static_placeholder_result(
     benefit_code: str, benefit_name: str, rule: BenefitRuleVersion, todo_note: str
 ) -> EligibilityResult:
@@ -1053,17 +1192,6 @@ def _static_placeholder_result(
 
 
 
-def evaluate_adoption_leave_eligibility(
-    request: MaternityLeaveEligibilityRequest, rule: BenefitRuleVersion
-) -> EligibilityResult:
-    return _static_placeholder_result(
-        ADOPTION_LEAVE_BENEFIT_CODE,
-        ADOPTION_LEAVE_BENEFIT_NAME,
-        rule,
-        "Docelowo: tabela 20/31/33/35/37 tygodni (jak zasiłek macierzyński), min. 9 "
-        "tygodni, 100% podstawy, z limitami wieku dziecka zależnymi od formy "
-        "(przysposobienie / rodzina zastępcza).",
-    )
 
 
 def evaluate_stillbirth_funeral_benefit_eligibility(
