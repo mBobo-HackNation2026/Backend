@@ -68,20 +68,54 @@ projektu `project-ebobo-stub-benefits-debt`:
 Traktuj prośbę "dokończ Fazę 2" / "dopracuj świadczenia" jako niekompletną,
 dopóki te 5 kodów nie przestanie być statyczne.
 
-### Co zostało (kolejne fazy)
+### Co zostało (priorytety, reset 2026-11-21)
 
-| Faza | Zakres | Status |
+Główny sposób korzystania z eBobo to **inteligentna ankieta z polami w
+aplikacji**, nie przesyłanie dokumentów. Przepływ: (1) rodzic odpowiada na
+pytania (zatrudnienie, ubezpieczenie, data porodu, dochody, drugi rodzic),
+(2) backend ocenia sytuację (uprawnienia, przeszkody, możliwości, przepisy),
+(3) rodzic porównuje warianty (kwoty, długość urlopów, podział między
+rodziców), (4) eBobo pokazuje co dalej (dokumenty, terminy, właściwy wniosek,
+miejsce złożenia).
+
+**Granica zakresu**: eBobo ustala potencjalne uprawnienia i liczy/porównuje
+warianty świadczeń. **Nie buduje własnego systemu składania/rozpatrywania
+wniosków** — samo złożenie i rozpatrzenie zostaje po stronie ZUS lub
+pracodawcy/płatnika (formularz ZAM idzie przez eZUS albo przez pracodawcę,
+zależnie kto jest płatnikiem). Rola eBobo kończy się na wskazaniu właściwej
+procedury, dokumentów i terminów.
+
+Wymóg obsługi przykładowych PDF-ów zostaje, ale tylko jako **minimalny
+mechanizm dla jury** (nie usuwamy go całkiem - brief wprost wspomina wybór/
+upload wybranych wniosków): (A) wybór gotowej sprawy — appka wypełnia
+formularz danymi przygotowanymi dla tego scenariusza i uruchamia prawdziwy
+silnik + kalkulator; (B) własny przypadek — jury wypełnia pola bezpośrednio w
+eBobo; (C) opcjonalny prosty upload PDF, po którym jury ręcznie wprowadza/
+potwierdza dane — bez OCR i automatycznego parsowania w obu przypadkach.
+Automatyczny OCR i pełne parsowanie skanów są odłożone (ZUS wymaga możliwości
+testowania na przykładach, nie wymaga konkretnie OCR).
+
+Ważna zasada do zachowania w UI/API: zaznaczenie przez rodzica „mam
+ubezpieczenie” to tylko deklaracja — nie potwierdza rzeczywistego statusu w
+ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
+`MockZUSProvider` pokazujemy osobno, nigdy scalone w jeden fakt.
+
+| # | Zakres | Status |
 |---|---|---|
-| 0 | Fundament autoryzacji | ✅ zrobione |
-| 1 | Silnik uprawnień v1 (zasiłek macierzyński + art. 30) | ✅ zrobione |
-| 2 | Pozostałe świadczenia (6 kodów wyżej) | 🟡 zarejestrowane jako placeholdery, realna logika w toku |
-| 3 | Warstwa detekcji ścieżek międzyrodzicielskich ("sprawdź drugiego rodzica") | ⬜ nierozpoczęte |
-| 4 | `MockZUSProvider` — symulowany status ubezpieczenia/okresów/zadłużenia zamiast ręcznego inputu | ⬜ nierozpoczęte |
-| 5 | Upload dokumentów + parsowanie PyMuPDF (uwaga: próbki w `resorces/Sprawy/` to skany bez warstwy tekstowej — potrzebny OCR, np. pytesseract) | ⬜ nierozpoczęte |
-| 6 | Agregacja planu wielu świadczeń (`/plans/generate`) | ⬜ nierozpoczęte |
-| 7 | Kalkulator (`/benefits/calculate`, `/compare`) | ⬜ nierozpoczęte |
-| 8 | Panel administracyjny CRUD dla katalogu świadczeń/reguł | ⬜ nierozpoczęte |
-| 9 | Dashboard/kalendarz/przypomnienia | ⬜ nierozpoczęte |
+| 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ⬜ nierozpoczęte |
+| 2 | Dopracowanie silnika uprawnień, w kolejności: urlop rodzicielski (+ podział między rodzicami), zasiłek chorobowy w ciąży, **świadczenie rehabilitacyjne** (nowość, 90%/75%/100% w ciąży, max 12 mies.), uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, pozostałe sytuacje szczególne | 🟡 3 zrobione, 5 placeholderów (patrz wyżej) |
+| 2a | **Jawne oznaczenie statusu implementacji** (implemented/stub) w odpowiedzi API — placeholdery dziś zwracają `HTTP 200` z ostrzeżeniem tylko w tekście; FE potrzebuje pola, które da się odczytać programistycznie | ⬜ nierozpoczęte |
+| 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ⬜ nierozpoczęte |
+| 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |
+| 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |
+| 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ⬜ nierozpoczęte |
+| 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
+
+Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
+OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
+parentingowy, dziennik zdrowia dziecka, zaawansowane przypomnienia push.
+Podstawowe informacje o pomocy w trudnych sytuacjach zostają (wymagane przez
+ZUS).
 
 Kolejne moduły będą dodawane iteracyjnie w `app/services`, `app/eligibility`,
 `app/rules` i `app/api/v1/endpoints`.
