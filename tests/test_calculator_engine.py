@@ -87,16 +87,46 @@ def test_basis_of_calculation_applies_13_71_percent_deduction() -> None:
     assert basis.minimum_basis_applied is False
 
 
-def test_basis_of_calculation_applies_minimum_floor_for_employee() -> None:
+def test_basis_of_calculation_applies_minimum_floor_for_full_time_employee() -> None:
     basis = calculate_basis_of_calculation(
         average_monthly_income_zl=Decimal("1000.00"),
         insurance_title=InsuranceTitle.umowa_o_prace,
         voluntary_contribution_base_zl=None,
+        is_full_time_employment=True,
     )
 
     assert basis is not None
     assert basis.minimum_basis_applied is True
     assert basis.monthly_basis_zl == Decimal("4147.10")
+
+
+def test_basis_of_calculation_does_not_apply_floor_without_full_time_status() -> None:
+    """Art. 45 ust. 1 ustawy zasiłkowej restricts the floor to full-time employment -
+    when that status is unknown, the calculator must not guess it applies."""
+    basis = calculate_basis_of_calculation(
+        average_monthly_income_zl=Decimal("1000.00"),
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        voluntary_contribution_base_zl=None,
+        is_full_time_employment=None,
+    )
+
+    assert basis is not None
+    assert basis.minimum_basis_applied is False
+    assert basis.monthly_basis_zl == Decimal("862.90")
+    assert any("pełnym wymiarze" in w for w in basis.warnings)
+
+
+def test_basis_of_calculation_does_not_apply_floor_for_part_time_employee() -> None:
+    basis = calculate_basis_of_calculation(
+        average_monthly_income_zl=Decimal("1000.00"),
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        voluntary_contribution_base_zl=None,
+        is_full_time_employment=False,
+    )
+
+    assert basis is not None
+    assert basis.minimum_basis_applied is False
+    assert basis.monthly_basis_zl == Decimal("862.90")
 
 
 def test_basis_of_calculation_uses_voluntary_contribution_base_for_zlecenie() -> None:

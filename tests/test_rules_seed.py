@@ -196,7 +196,9 @@ def test_ensure_seeded_creates_supplementary_maternity_leave_rule() -> None:
         )
 
         assert rule.rate_percentage == Decimal("100.00")
-        assert rule.weeks_by_child_count is None
+        # Reuses the standard maternity-leave table, but only as a reference point for
+        # the Kodeks pracy art. 1802 §4 filing deadline - not this benefit's own weeks.
+        assert rule.weeks_by_child_count == {"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37}
     finally:
         db.close()
 

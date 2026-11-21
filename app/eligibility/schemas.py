@@ -269,13 +269,24 @@ class MaternityLeaveEligibilityRequest(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Dotyczy wyłącznie sytuacji martwego urodzenia/zgonu dziecka: liczba dni, "
-            "które upłynęły od zgonu dziecka - minimalny gwarantowany wymiar urlopu "
-            "macierzyńskiego to 7 dni od zgonu (Kodeks pracy art. 1801). None = nieznane."
+            "Dotyczy wyłącznie minimalnego gwarantowanego wymiaru urlopu macierzyńskiego "
+            "po zgonie dziecka (7 dni od zgonu, Kodeks pracy art. 1801) - NIE używane do "
+            "terminu zasiłku pogrzebowego przy martwym urodzeniu, który liczy się od dnia "
+            "pochówku, nie od zgonu (patrz days_since_burial). None = nieznane."
+        ),
+    )
+    days_since_burial: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Dotyczy wyłącznie zasiłku pogrzebowego w razie martwego urodzenia: liczba "
+            "dni, które upłynęły od dnia pochówku (nie od zgonu/porodu) - wniosek Z-12 "
+            "trzeba złożyć w ciągu 12 miesięcy od dnia pochówku (Poradnik ZUS 2026, "
+            "s.36). None = nieznane."
         ),
     )
 
-    # --- Podstawa wymiaru (dla przyszłego kalkulatora) ---
+    # --- Podstawa wymiaru (dla kalkulatora) ---
     average_monthly_income_zl: Decimal | None = Field(
         default=None,
         ge=0,
@@ -284,6 +295,17 @@ class MaternityLeaveEligibilityRequest(BaseModel):
             "poprzedzających miesiąc powstania prawa do świadczenia - podstawa wyliczenia "
             "podstawy wymiaru zasiłku (ustawa zasiłkowa art. 36-38 dla pracownika, art. 48 "
             "dla niebędącego pracownikiem). None = nieznane."
+        ),
+    )
+    is_full_time_employment: bool | None = Field(
+        default=None,
+        description=(
+            "Czy ubezpieczony jest zatrudniony w pełnym wymiarze czasu pracy. Używane "
+            "wyłącznie do ustalenia, czy stosuje się podstawę minimalną (ustawa "
+            "zasiłkowa art. 45 ust. 1 - dotyczy wyłącznie pracy w pełnym wymiarze czasu "
+            "pracy; przy niepełnym etacie podstawa minimalna nie obowiązuje). "
+            "None = nieznane - kalkulator wtedy NIE stosuje podstawy minimalnej i "
+            "sygnalizuje to ostrzeżeniem, zamiast zgadywać."
         ),
     )
     employment_duration_months: int | None = Field(

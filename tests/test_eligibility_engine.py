@@ -970,13 +970,16 @@ def _make_supplementary_leave_rule() -> BenefitRuleVersion:
         is_current=True,
         effective_from=date(2026, 1, 1),
         rate_percentage=Decimal("100.00"),
-        weeks_by_child_count=None,
+        # Standard maternity-leave week table - used only to compute the real filing
+        # deadline (Kodeks pracy art. 1802 §4: 21 days / 3 weeks before the end of the
+        # base maternity leave), not the supplementary leave's own entitlement.
+        weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
         duration_until_birth=False,
         debt_threshold_percent_of_min_wage=Decimal("1.00"),
         min_wage_reference_zl=Decimal("4806.00"),
         institution="Pracodawca albo ZUS",
-        legal_basis=["Kodeks pracy art. 1802 §1"],
-        deadlines=["Przed upływem granicznego tygodnia po porodzie"],
+        legal_basis=["Kodeks pracy art. 1802 §1, §3 i §4"],
+        deadlines=["21 dni przed zakończeniem urlopu macierzyńskiego"],
         required_documents=[
             {"code": "wniosek", "name": "Wniosek", "when": "...", "applies_to": None},
         ],
@@ -1001,37 +1004,58 @@ def test_supplementary_leave_likely_eligible_standard_case() -> None:
     assert result.plan.rate_percentage == Decimal("100.00")
 
 
-def test_supplementary_leave_extended_deadline_for_very_premature_birth() -> None:
-    rule = _make_supplementary_leave_rule()
-    request = MaternityLeaveEligibilityRequest(
-        children_count=1,
-        child_hospitalization_weeks=2,
-        gestational_week_at_birth=25,
-        birth_weight_grams=900,
-        postpartum_weeks_elapsed=12,
-    )
-
-    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
-
-    # 12 weeks post-partum is past the standard 8-week deadline but within the
-    # extended 15-week deadline for very premature/low-weight births.
-    assert result.status == EligibilityStatus.likely_eligible
-
-
-def test_supplementary_leave_not_eligible_past_standard_8_week_deadline() -> None:
+def test_supplementary_leave_past_hospitalization_cutoff_week_is_still_eligible() -> None:
+    """The 8th/15th week post-partum only limits WHICH hospitalization weeks count
+    toward the entitlement (Kodeks pracy art. 1802 §1 i §3) - it is not a filing
+    deadline, so being past it must not disqualify the benefit by itself."""
     rule = _make_supplementary_leave_rule()
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
         child_hospitalization_weeks=2,
         gestational_week_at_birth=34,
         birth_weight_grams=2200,
-        postpartum_weeks_elapsed=9,
+        postpartum_weeks_elapsed=10,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert any("8. tydzień" in w or "hospitalizacji" in w for w in result.warnings)
+
+
+def test_supplementary_leave_not_eligible_when_filing_deadline_passed() -> None:
+    """Real deadline: wniosek nie później niż 21 dni (3 tygodnie) przed końcem urlopu
+    macierzyńskiego (Kodeks pracy art. 1802 §4). 1 child -> 20-week maternity leave;
+    at 18 weeks post-partum only 2 weeks remain, which is under the 3-week minimum."""
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=2,
+        gestational_week_at_birth=34,
+        birth_weight_grams=2200,
+        postpartum_weeks_elapsed=18,
     )
 
     result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
 
     assert result.status == EligibilityStatus.not_eligible
     assert result.plan is None
+    assert any("art. 1802 §4" in c for c in result.unmet_conditions)
+
+
+def test_supplementary_leave_filing_deadline_exactly_3_weeks_remaining_is_eligible() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=2,
+        gestational_week_at_birth=34,
+        birth_weight_grams=2200,
+        postpartum_weeks_elapsed=17,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
 
 
 def test_supplementary_leave_not_eligible_without_hospitalization() -> None:
@@ -1214,11 +1238,13 @@ def _make_stillbirth_funeral_rule() -> BenefitRuleVersion:
 
 
 def test_stillbirth_funeral_benefit_likely_eligible_within_deadline() -> None:
+    """Deadline runs from the day of BURIAL (days_since_burial), not death - the
+    Poradnik ZUS 2026 wording is explicit about this for the stillbirth variant."""
     rule = _make_stillbirth_funeral_rule()
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
         is_stillbirth_or_infant_death=True,
-        days_since_death=30,
+        days_since_burial=30,
     )
 
     result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
@@ -1235,7 +1261,7 @@ def test_stillbirth_funeral_benefit_not_eligible_past_12_month_deadline() -> Non
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
         is_stillbirth_or_infant_death=True,
-        days_since_death=400,
+        days_since_burial=400,
     )
 
     result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
@@ -1249,13 +1275,30 @@ def test_stillbirth_funeral_benefit_not_eligible_without_stillbirth() -> None:
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
         is_stillbirth_or_infant_death=False,
-        days_since_death=10,
+        days_since_burial=10,
     )
 
     result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
 
     assert result.status == EligibilityStatus.not_eligible
     assert result.plan is None
+
+
+def test_stillbirth_funeral_benefit_days_since_death_alone_is_not_enough() -> None:
+    """days_since_death (art. 1801 leave-after-death purpose) must NOT be mistaken for
+    days_since_burial (the Z-12 filing deadline) - providing only the former still
+    leaves the deadline unconfirmed."""
+    rule = _make_stillbirth_funeral_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        is_stillbirth_or_infant_death=True,
+        days_since_death=30,
+    )
+
+    result = evaluate_stillbirth_funeral_benefit_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert any("pochówku" in m for m in result.missing_data)
 
 
 def test_stillbirth_funeral_benefit_requires_verification_when_fields_missing() -> None:

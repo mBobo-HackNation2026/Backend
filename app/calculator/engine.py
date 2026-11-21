@@ -85,6 +85,7 @@ def calculate_basis_of_calculation(
     average_monthly_income_zl: Decimal | None,
     insurance_title: InsuranceTitle | None,
     voluntary_contribution_base_zl: Decimal | None,
+    is_full_time_employment: bool | None = None,
 ) -> BasisOfCalculation | None:
     """Ustawa zasiłkowa art. 36-38 (pracownik) / art. 48 (niebędący pracownikiem).
 
@@ -113,23 +114,32 @@ def calculate_basis_of_calculation(
         source * (Decimal(100) - _EMPLOYEE_CONTRIBUTION_DEDUCTION_PERCENT) / Decimal(100)
     )
 
+    # Art. 45 ust. 1 ustawy zasiłkowej restricts the minimum-basis floor to "pracy w
+    # pełnym wymiarze czasu pracy" (full-time employment) - never apply it to voluntary
+    # insurance, and never guess full-time status when it isn't given.
     minimum_basis_applied = False
     if not is_voluntary:
-        minimum_floor = _round(
-            _MINIMUM_WAGE_2026_ZL
-            * (Decimal(100) - _EMPLOYEE_CONTRIBUTION_DEDUCTION_PERCENT)
-            / Decimal(100)
-        )
-        if monthly_basis < minimum_floor:
-            monthly_basis = minimum_floor
-            minimum_basis_applied = True
+        if is_full_time_employment is None:
             warnings.append(
-                "Zastosowano podstawę minimalną wyliczoną ze wzoru (płaca minimalna "
-                f"{_MINIMUM_WAGE_2026_ZL} zł pomniejszona o 13,71%) - oficjalna, gotowa "
-                "tabela minimalnych podstaw nie jest publikowana w dostępnych materiałach "
-                "źródłowych (ustawa zasiłkowa art. 45); dotyczy wyłącznie pracowników "
-                "pełnoetatowych, nie dobrowolnie ubezpieczonych."
+                "Nie podano, czy zatrudnienie jest w pełnym wymiarze czasu pracy - "
+                "podstawa minimalna (ustawa zasiłkowa art. 45 ust. 1, dotyczy wyłącznie "
+                "pełnego etatu) nie została sprawdzona, żeby jej nie zgadywać."
             )
+        elif is_full_time_employment:
+            minimum_floor = _round(
+                _MINIMUM_WAGE_2026_ZL
+                * (Decimal(100) - _EMPLOYEE_CONTRIBUTION_DEDUCTION_PERCENT)
+                / Decimal(100)
+            )
+            if monthly_basis < minimum_floor:
+                monthly_basis = minimum_floor
+                minimum_basis_applied = True
+                warnings.append(
+                    "Zastosowano podstawę minimalną wyliczoną ze wzoru (płaca minimalna "
+                    f"{_MINIMUM_WAGE_2026_ZL} zł pomniejszona o 13,71%) - oficjalna, "
+                    "gotowa tabela minimalnych podstaw nie jest publikowana w dostępnych "
+                    "materiałach źródłowych (ustawa zasiłkowa art. 45 ust. 1)."
+                )
 
     daily_basis = _round(monthly_basis / Decimal(_DAYS_PER_MONTH))
 
@@ -252,6 +262,7 @@ def calculate_benefit(
         average_monthly_income_zl=request.average_monthly_income_zl,
         insurance_title=request.insurance_title,
         voluntary_contribution_base_zl=request.voluntary_contribution_base_zl,
+        is_full_time_employment=request.is_full_time_employment,
     )
     if basis is None:
         warnings.append(
@@ -312,6 +323,7 @@ def compare_parental_leave_variants(
             average_monthly_income_zl=parent.average_monthly_income_zl,
             insurance_title=parent.insurance_title,
             voluntary_contribution_base_zl=parent.voluntary_contribution_base_zl,
+            is_full_time_employment=parent.is_full_time_employment,
         )
         if basis is None:
             return None

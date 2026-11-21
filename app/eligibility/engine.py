@@ -193,8 +193,7 @@ def evaluate_maternity_leave_eligibility(
                 )
             )
         elif (
-            request.employment_ended_reason
-            == EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu
+            request.employment_ended_reason == EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu
         ):
             # Unlike the branch above, this reason has no related_benefit_code: art. 30
             # ust. 1 pkt 2 grants THIS SAME benefit (not the separate "do dnia porodu"
@@ -569,11 +568,7 @@ def evaluate_parental_leave_eligibility(
         status == EligibilityStatus.requires_verification and not unmet_conditions
     )
     plan = None
-    if (
-        is_standard_path_open
-        and weeks_for_applicant is not None
-        and rate_percentage is not None
-    ):
+    if is_standard_path_open and weeks_for_applicant is not None and rate_percentage is not None:
         final_weeks = weeks_for_applicant
         if part_time_fraction is not None and part_time_fraction > 0:
             extended = Decimal(weeks_for_applicant) / (Decimal(1) - part_time_fraction)
@@ -602,9 +597,7 @@ def evaluate_parental_leave_eligibility(
 
 _SICKNESS_PREGNANCY_WAITING_DAYS_MANDATORY = 30
 _SICKNESS_PREGNANCY_WAITING_DAYS_VOLUNTARY = 90
-_SICKNESS_PREGNANCY_MAX_DURATION_DESCRIPTION = (
-    "do 270 dni niezdolności do pracy w okresie ciąży"
-)
+_SICKNESS_PREGNANCY_MAX_DURATION_DESCRIPTION = "do 270 dni niezdolności do pracy w okresie ciąży"
 
 
 def _build_sickness_during_pregnancy_plan(
@@ -772,8 +765,7 @@ def evaluate_rehabilitation_benefit_eligibility(
         missing_data.append("czy wyczerpano maksymalny okres zasiłku chorobowego")
     elif request.sickness_benefit_period_exhausted:
         met_conditions.append(
-            "wyczerpano maksymalny okres zasiłku chorobowego (ustawa zasiłkowa art. 18 "
-            "ust. 1)"
+            "wyczerpano maksymalny okres zasiłku chorobowego (ustawa zasiłkowa art. 18 ust. 1)"
         )
     else:
         unmet_conditions.append(
@@ -803,8 +795,7 @@ def evaluate_rehabilitation_benefit_eligibility(
         )
     else:
         unmet_conditions.append(
-            "brak pozytywnego rokowania lekarza orzecznika ZUS co do odzyskania "
-            "zdolności do pracy"
+            "brak pozytywnego rokowania lekarza orzecznika ZUS co do odzyskania zdolności do pracy"
         )
         solutions.append(
             PossibleSolution(
@@ -849,9 +840,7 @@ def evaluate_rehabilitation_benefit_eligibility(
 
     rate_percentage: Decimal | None = None
     if request.is_pregnant is None:
-        missing_data.append(
-            "status ciąży (wpływa na stawkę: 100% zamiast 90%/75%)"
-        )
+        missing_data.append("status ciąży (wpływa na stawkę: 100% zamiast 90%/75%)")
     elif request.is_pregnant:
         rate_percentage = _REHABILITATION_RATE_PREGNANT
         met_conditions.append(
@@ -893,10 +882,15 @@ def evaluate_rehabilitation_benefit_eligibility(
     )
 
 
-_SUPPLEMENTARY_LEAVE_EXTENDED_DEADLINE_WEEK = 15
-_SUPPLEMENTARY_LEAVE_STANDARD_DEADLINE_WEEK = 8
+_SUPPLEMENTARY_LEAVE_EXTENDED_CUTOFF_WEEK = 15
+_SUPPLEMENTARY_LEAVE_STANDARD_CUTOFF_WEEK = 8
 _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_GESTATIONAL_WEEK = 28
 _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS = 1000
+# Kodeks pracy art. 1802 §4: wniosek składa się "w terminie niekrótszym niż 21 dni przed
+# zakończeniem korzystania z urlopu macierzyńskiego" - to jest FAKTYCZNY termin graniczny
+# tego świadczenia, niezależny od 8./15. tygodnia po porodzie (ten drugi tylko ogranicza,
+# które tygodnie hospitalizacji się liczą - §1/§3 - a nie kiedy trzeba złożyć wniosek).
+_SUPPLEMENTARY_LEAVE_FILING_DEADLINE_WEEKS_BEFORE_END = 3
 
 
 def _build_supplementary_maternity_leave_plan(
@@ -939,55 +933,84 @@ def evaluate_supplementary_maternity_leave_eligibility(
     else:
         weeks = request.child_hospitalization_weeks
         met_conditions.append(
-            f"hospitalizacja dziecka po porodzie przez {weeks} tyg. (Kodeks pracy "
-            "art. 1802 §1)"
+            f"hospitalizacja dziecka po porodzie przez {weeks} tyg. (Kodeks pracy art. 1802 §1)"
         )
 
-    deadline_week: int | None = None
+    # Tydzień graniczny (8. albo 15. po porodzie) ogranicza WYŁĄCZNIE, które tygodnie
+    # pobytu w szpitalu wlicza się do wymiaru urlopu (Kodeks pracy art. 1802 §1 i §3) -
+    # to NIE jest termin na skorzystanie z urlopu ani na złożenie wniosku (ten jest
+    # osobno, §4, patrz niżej). Tu tylko informujemy, który próg obowiązuje.
+    cutoff_week: int | None = None
     if request.gestational_week_at_birth is None or request.birth_weight_grams is None:
         missing_data.append(
             "tydzień ciąży w dniu porodu i masa urodzeniowa dziecka (potrzebne do "
-            "ustalenia granicznego tygodnia po porodzie: 15. albo 8.)"
+            "ustalenia, które tygodnie hospitalizacji się liczą: do 15. albo do 8. "
+            "tygodnia po porodzie)"
         )
     else:
         is_extended_case = (
             request.gestational_week_at_birth < _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_GESTATIONAL_WEEK
             or request.birth_weight_grams <= _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS
         )
-        deadline_week = (
-            _SUPPLEMENTARY_LEAVE_EXTENDED_DEADLINE_WEEK
+        cutoff_week = (
+            _SUPPLEMENTARY_LEAVE_EXTENDED_CUTOFF_WEEK
             if is_extended_case
-            else _SUPPLEMENTARY_LEAVE_STANDARD_DEADLINE_WEEK
+            else _SUPPLEMENTARY_LEAVE_STANDARD_CUTOFF_WEEK
         )
         met_conditions.append(
-            f"graniczny termin skorzystania z urlopu: {deadline_week}. tydzień po "
-            "porodzie (Kodeks pracy art. 1802 §1)"
+            f"do wymiaru liczą się tygodnie hospitalizacji do {cutoff_week}. tygodnia "
+            "po porodzie (Kodeks pracy art. 1802 §1 i §3)"
         )
+        if (
+            request.postpartum_weeks_elapsed is not None
+            and request.postpartum_weeks_elapsed > cutoff_week
+        ):
+            warnings.append(
+                f"Minął {cutoff_week}. tydzień po porodzie - jeśli hospitalizacja "
+                "trwała dłużej, do wymiaru urlopu liczą się tylko tygodnie przypadające "
+                "do tego tygodnia (Kodeks pracy art. 1802 §1 i §3); upewnij się, że "
+                "podana liczba tygodni hospitalizacji już to uwzględnia."
+            )
 
+    # Rzeczywisty termin graniczny: wniosek najpóźniej 21 dni (3 tygodnie) przed
+    # zakończeniem podstawowego urlopu macierzyńskiego (Kodeks pracy art. 1802 §4) -
+    # niezależny od tygodnia granicznego powyżej.
     if request.postpartum_weeks_elapsed is None:
-        missing_data.append("liczba tygodni, które upłynęły od porodu")
-    elif deadline_week is not None:
-        if request.postpartum_weeks_elapsed > deadline_week:
+        missing_data.append(
+            "liczba tygodni, które upłynęły od porodu (potrzebna do ustalenia terminu "
+            "złożenia wniosku - art. 1802 §4)"
+        )
+    else:
+        maternity_leave_weeks = _weeks_for_children_count(
+            rule.weeks_by_child_count, request.children_count
+        )
+        weeks_remaining_of_maternity_leave = (
+            maternity_leave_weeks - request.postpartum_weeks_elapsed
+        )
+        if (
+            weeks_remaining_of_maternity_leave
+            < _SUPPLEMENTARY_LEAVE_FILING_DEADLINE_WEEKS_BEFORE_END
+        ):
             unmet_conditions.append(
-                f"minął graniczny {deadline_week}. tydzień po porodzie - termin na "
-                "skorzystanie z uzupełniającego urlopu macierzyńskiego wygasł (Kodeks "
-                "pracy art. 1802 §1)"
+                "termin na złożenie wniosku minął - wniosek trzeba złożyć nie później "
+                "niż 21 dni przed zakończeniem podstawowego urlopu macierzyńskiego "
+                "(Kodeks pracy art. 1802 §4)"
             )
             solutions.append(
                 PossibleSolution(
                     type=SolutionType.limitation,
                     description=(
-                        "Termin na skorzystanie z uzupełniającego urlopu macierzyńskiego "
-                        "upłynął - prawo do niego wygasa po wskazanym tygodniu po "
-                        "porodzie i nie podlega przywróceniu."
+                        "Wniosek o uzupełniający urlop macierzyński trzeba złożyć nie "
+                        "później niż 21 dni przed zakończeniem korzystania z urlopu "
+                        "macierzyńskiego - po tym terminie prawo wygasa."
                     ),
-                    legal_basis="Kodeks pracy art. 1802 §1",
+                    legal_basis="Kodeks pracy art. 1802 §4",
                 )
             )
         else:
             met_conditions.append(
-                f"termin nie minął - {request.postpartum_weeks_elapsed} tyg. po "
-                f"porodzie, granica {deadline_week} tyg. (Kodeks pracy art. 1802 §1)"
+                "termin na złożenie wniosku (21 dni przed końcem urlopu "
+                "macierzyńskiego) nie minął (Kodeks pracy art. 1802 §4)"
             )
 
     _apply_self_employed_debt_check(
@@ -1080,8 +1103,7 @@ def evaluate_adoption_leave_eligibility(
         elif request.foster_care_type == FosterCareType.wniosek_o_przysposobienie:
             age_limit = _ADOPTION_LEAVE_PETITION_AGE_LIMIT
             met_conditions.append(
-                f"przysposobienie - limit wieku dziecka {age_limit} lat (Kodeks pracy "
-                "art. 183 §1)"
+                f"przysposobienie - limit wieku dziecka {age_limit} lat (Kodeks pracy art. 183 §1)"
             )
         else:
             if request.school_obligation_deferred is None:
@@ -1156,8 +1178,6 @@ def evaluate_adoption_leave_eligibility(
     )
 
 
-
-
 _STILLBIRTH_FUNERAL_DEADLINE_DAYS = 365
 
 
@@ -1216,9 +1236,9 @@ def evaluate_stillbirth_funeral_benefit_eligibility(
             )
         )
 
-    if request.days_since_death is None:
-        missing_data.append("liczba dni, które upłynęły od zgonu/martwego urodzenia")
-    elif request.days_since_death > _STILLBIRTH_FUNERAL_DEADLINE_DAYS:
+    if request.days_since_burial is None:
+        missing_data.append("liczba dni, które upłynęły od dnia pochówku")
+    elif request.days_since_burial > _STILLBIRTH_FUNERAL_DEADLINE_DAYS:
         unmet_conditions.append(
             f"minęło więcej niż {_STILLBIRTH_FUNERAL_DEADLINE_DAYS} dni (12 miesięcy) od "
             "pochówku - termin na złożenie wniosku Z-12 wygasł"
@@ -1234,7 +1254,7 @@ def evaluate_stillbirth_funeral_benefit_eligibility(
         )
     else:
         met_conditions.append(
-            f"termin 12 miesięcy od pochówku nie minął ({request.days_since_death} dni)"
+            f"termin 12 miesięcy od pochówku nie minął ({request.days_since_burial} dni)"
         )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -1242,9 +1262,7 @@ def evaluate_stillbirth_funeral_benefit_eligibility(
     is_standard_path_open = status == EligibilityStatus.likely_eligible or (
         status == EligibilityStatus.requires_verification and not unmet_conditions
     )
-    plan = (
-        _build_stillbirth_funeral_benefit_plan(rule, request) if is_standard_path_open else None
-    )
+    plan = _build_stillbirth_funeral_benefit_plan(rule, request) if is_standard_path_open else None
 
     return EligibilityResult(
         benefit_code=STILLBIRTH_FUNERAL_BENEFIT_CODE,

@@ -100,6 +100,7 @@ class ParentCalculationInput(BaseModel):
     average_monthly_income_zl: Decimal | None = Field(default=None)
     insurance_title: InsuranceTitle | None = Field(default=None)
     voluntary_contribution_base_zl: Decimal | None = Field(default=None)
+    is_full_time_employment: bool | None = Field(default=None)
 
 
 class ParentalLeaveCompareRequest(BaseModel):

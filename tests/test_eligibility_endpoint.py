@@ -201,8 +201,7 @@ def test_check_eligibility_sickness_during_pregnancy_likely_eligible(
     body = response.json()
     assert body["status"] == "likely_eligible"
     assert (
-        body["plan"]["duration_description"]
-        == "do 270 dni niezdolności do pracy w okresie ciąży"
+        body["plan"]["duration_description"] == "do 270 dni niezdolności do pracy w okresie ciąży"
     )
     assert body["plan"]["rate_percentage"] == "100.00"
 
@@ -288,9 +287,11 @@ def test_check_eligibility_supplementary_maternity_leave_likely_eligible(
     assert body["plan"]["rate_percentage"] == "100.00"
 
 
-def test_check_eligibility_supplementary_maternity_leave_deadline_passed(
+def test_check_eligibility_supplementary_maternity_leave_past_cutoff_week_still_eligible(
     client: TestClient,
 ) -> None:
+    """Past the 8th/15th week post-partum only limits which hospitalization weeks
+    count (Kodeks pracy art. 1802 §1/§3) - it must not disqualify the benefit."""
     response = client.post(
         f"/api/v1/eligibility/check/{SUPPLEMENTARY_MATERNITY_LEAVE_CODE}",
         json={
@@ -299,6 +300,28 @@ def test_check_eligibility_supplementary_maternity_leave_deadline_passed(
             "gestational_week_at_birth": 30,
             "birth_weight_grams": 1800,
             "postpartum_weeks_elapsed": 9,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "likely_eligible"
+    assert body["plan"] is not None
+
+
+def test_check_eligibility_supplementary_maternity_leave_filing_deadline_passed(
+    client: TestClient,
+) -> None:
+    """Real deadline: wniosek nie później niż 21 dni przed końcem urlopu
+    macierzyńskiego (Kodeks pracy art. 1802 §4)."""
+    response = client.post(
+        f"/api/v1/eligibility/check/{SUPPLEMENTARY_MATERNITY_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "child_hospitalization_weeks": 3,
+            "gestational_week_at_birth": 30,
+            "birth_weight_grams": 1800,
+            "postpartum_weeks_elapsed": 18,
         },
     )
 
@@ -374,11 +397,13 @@ def test_check_eligibility_accepts_full_expanded_request_schema(client: TestClie
             "excluded_from_rehabilitation_benefit": False,
             "is_stillbirth_or_infant_death": False,
             "days_since_death": None,
+            "days_since_burial": None,
             "average_monthly_income_zl": "5500.00",
             "employment_duration_months": 18,
             "voluntary_contribution_base_zl": None,
             "bonus_type": "kwartalna",
             "months_since_last_benefit": "0.5",
+            "is_full_time_employment": True,
         },
     )
 
@@ -394,7 +419,7 @@ def test_check_eligibility_stillbirth_funeral_benefit_likely_eligible(
         json={
             "children_count": 1,
             "is_stillbirth_or_infant_death": True,
-            "days_since_death": 30,
+            "days_since_burial": 30,
         },
     )
 
@@ -413,7 +438,7 @@ def test_check_eligibility_stillbirth_funeral_benefit_deadline_passed(
         json={
             "children_count": 1,
             "is_stillbirth_or_infant_death": True,
-            "days_since_death": 400,
+            "days_since_burial": 400,
         },
     )
 

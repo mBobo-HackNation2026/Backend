@@ -45,7 +45,7 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   dobrowolnej, rodzaj premii, przerwa między zasiłkami). Front może budować
   pełną ankietę na tym kontrakcie już teraz - większość pól nie ma jeszcze
   logiki po stronie silnika (patrz sekcja "W trakcie" niżej).
-- **8 świadczeń w pełni zaimplementowane** (realna logika oceny):
+- **9 świadczeń w pełni zaimplementowane** (realna logika oceny):
   - `zasilek_macierzynski_urlop_macierzynski` — zasiłek macierzyński za okres
     urlopu macierzyńskiego.
   - `zasilek_w_wysokosci_zasilku_macierzynskiego` — alternatywna ścieżka z
@@ -91,14 +91,16 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   - `uzupelniajacy_urlop_macierzynski` — uzupełniający urlop
     macierzyński (hospitalizacja dziecka po porodzie), 1 tydzień urlopu za
     każdy tydzień hospitalizacji (`child_hospitalization_weeks`), 100%
-    podstawy. Graniczny termin skorzystania to 15. tydzień po porodzie przy
-    urodzeniu <28 tyg. ciąży lub masie ≤1000g, w pozostałych przypadkach 8.
-    tydzień (`gestational_week_at_birth`/`birth_weight_grams` ustalają które,
-    `postpartum_weeks_elapsed` sprawdza czy termin minął) - uproszczony model
-    dwóch progów zgodny z tym, co było już wcześniej udokumentowane publicznie;
-    trzeci, węższy przypadek z Kodeksu pracy art. 1802 §1 (poród o czasie z
-    późniejszą hospitalizacją) nie jest jeszcze modelowany. Zob.
-    `app/eligibility/engine.py` →
+    podstawy. **Poprawka po recenzji**: 15./8. tydzień po porodzie
+    (`gestational_week_at_birth`/`birth_weight_grams` ustalają który) to
+    WYŁĄCZNIE granica, które tygodnie hospitalizacji wliczają się do wymiaru
+    (Kodeks pracy art. 1802 §1 i §3) - nie termin na skorzystanie z urlopu,
+    jak wcześniej błędnie modelowano. Rzeczywisty termin graniczny to
+    wniosek złożony nie później niż 21 dni przed zakończeniem podstawowego
+    urlopu macierzyńskiego (art. 1802 §4, liczony z `postpartum_weeks_elapsed`
+    względem standardowej tabeli tygodni). Trzeci, węższy przypadek z art.
+    1802 §1 pkt 3 (poród o czasie z późniejszą hospitalizacją) nadal nie jest
+    osobno modelowany. Zob. `app/eligibility/engine.py` →
     `evaluate_supplementary_maternity_leave_eligibility`.
   - `urlop_na_warunkach_urlopu_macierzynskiego` — adopcja/rodzina
     zastępcza, ta sama tabela tygodni co zasiłek macierzyński (20/31/33/35/37),
@@ -118,10 +120,14 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     `lump_sum_amount_zl` na `BenefitRuleVersion` i `BenefitPlan`, a
     `rate_percentage` w `BenefitPlan` stało się opcjonalne (null dla
     świadczeń kwotowych). Gatuje przez `is_stillbirth_or_infant_death` i
-    12-miesięczny termin (`days_since_death`); jawne ostrzeżenie, że to pole
-    obejmuje też zgon dziecka po żywym urodzeniu przed 8. tygodniem życia,
-    którego ten silnik nie rozróżnia od martwego urodzenia. Zob.
-    `app/eligibility/engine.py` →
+    12-miesięczny termin. **Poprawka po recenzji**: termin liczy się od dnia
+    pochówku, nie od zgonu (Poradnik ZUS 2026, s.36) - dodano osobne pole
+    `days_since_burial` (zamiast błędnie używanego do tego celu
+    `days_since_death`, które zostaje wyłącznie dla gwarancji 7 dni urlopu
+    macierzyńskiego po zgonie dziecka, Kodeks pracy art. 1801). Jawne
+    ostrzeżenie, że `is_stillbirth_or_infant_death` obejmuje też zgon dziecka
+    po żywym urodzeniu przed 8. tygodniem życia, którego ten silnik nie
+    rozróżnia od martwego urodzenia. Zob. `app/eligibility/engine.py` →
     `evaluate_stillbirth_funeral_benefit_eligibility`.
 - **Zintegrowany kalkulator świadczeń** (`app/calculator/`) — **nowość**, priorytet
   #3 z briefu 2026-11-21, zbudowany od razu razem z porównaniem wariantów
@@ -135,9 +141,14 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     (pracownik) albo `voluntary_contribution_base_zl` ograniczone do 23 550 zł
     (zlecenie/działalność, art. 48), zawsze pomniejszone o 13,71% składek
     ubezpieczonego; stosuje podstawę minimalną wyliczoną ze wzoru (4806 zł ×
-    (1-13,71%) = 4147,10 zł), gdy obliczona jest niższa - z jawnym
-    ostrzeżeniem, że to wzór, nie oficjalna tabela (żadna nie istnieje w
-    dostępnych materiałach źródłowych). Świadczenia ryczałtowe (zasiłek
+    (1-13,71%) = 4147,10 zł), gdy obliczona jest niższa - **tylko dla
+    pełnego etatu** (`is_full_time_employment=true`, ustawa zasiłkowa art.
+    45 ust. 1 - poprawka po recenzji: wcześniej podstawa minimalna stosowała
+    się do każdego pracownika niezależnie od wymiaru etatu). Gdy wymiar
+    etatu jest nieznany, kalkulator NIE stosuje podstawy minimalnej zamiast
+    zgadywać, i ostrzega o tym jawnie. Ostrzeżenie towarzyszące podstawie
+    minimalnej też jasno mówi, że to wzór, nie oficjalna tabela (żadna nie
+    istnieje w dostępnych materiałach źródłowych). Świadczenia ryczałtowe (zasiłek
     pogrzebowy) zwracają `lump_sum_amount_zl` wprost. Świadczenia bez znanego
     z góry okresu (zasiłek w wysokości zasiłku macierzyńskiego - "do dnia
     porodu") zwracają samą podstawę/stawkę dzienną z ostrzeżeniem, nie
@@ -215,7 +226,6 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 |---|---|---|
 | 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ✅ zrobione (schemat w `app/eligibility/schemas.py`, patrz "Zrobione" wyżej) |
 | 2 | Dopracowanie silnika uprawnień (urlop rodzicielski, zasiłek chorobowy w ciąży, świadczenie rehabilitacyjne - nowe świadczenie, uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, zasiłek pogrzebowy przy martwym urodzeniu) | ✅ zrobione - wszystkie 9 świadczeń mają realną logikę, patrz "Zrobione" wyżej |
-| 2a | **Jawne oznaczenie statusu implementacji** (implemented/stub) w odpowiedzi API — placeholdery dziś zwracają `HTTP 200` z ostrzeżeniem tylko w tekście; FE potrzebuje pola, które da się odczytać programistycznie | ⬜ nierozpoczęte |
 | 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ✅ zrobione - kwoty per świadczenie + porównanie wariantów urlopu rodzicielskiego, patrz "Zrobione" wyżej; pola podstawy wymiaru dla zatrudnienia <12 mies./premii/przerwy między zasiłkami jeszcze nieobsłużone |
 | 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |
 | 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |

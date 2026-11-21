@@ -533,8 +533,7 @@ def _ensure_rehabilitation_benefit_seeded(db: Session) -> None:
             {
                 "code": "zaswiadczenie_lekarza_orzecznika",
                 "name": (
-                    "Orzeczenie lekarza orzecznika ZUS o rokowaniu odzyskania zdolności "
-                    "do pracy"
+                    "Orzeczenie lekarza orzecznika ZUS o rokowaniu odzyskania zdolności do pracy"
                 ),
                 "when": "wraz z wnioskiem",
                 "applies_to": None,
@@ -563,9 +562,10 @@ def _ensure_supplementary_maternity_leave_seeded(db: Session) -> None:
             name=SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_NAME,
             description=(
                 "Przedłużenie urlopu macierzyńskiego o 1 tydzień za każdy tydzień "
-                "pobytu dziecka w szpitalu po porodzie, jeśli wykorzystane w terminie "
-                "(15. albo 8. tydzień po porodzie, zależnie od okoliczności urodzenia). "
-                "100% podstawy wymiaru."
+                "pobytu dziecka w szpitalu po porodzie (tygodnie liczone do 15. albo "
+                "8. tygodnia po porodzie, zależnie od okoliczności urodzenia). Wniosek "
+                "składa się najpóźniej 21 dni przed zakończeniem podstawowego urlopu "
+                "macierzyńskiego. 100% podstawy wymiaru."
             ),
         )
         db.add(benefit_type)
@@ -586,7 +586,11 @@ def _ensure_supplementary_maternity_leave_seeded(db: Session) -> None:
         effective_from=date(2026, 1, 1),
         effective_to=None,
         rate_percentage=Decimal("100.00"),
-        weeks_by_child_count=None,
+        # Ta sama tabela co zasiłek macierzyński - używana TYLKO jako punkt odniesienia
+        # do wyliczenia terminu złożenia wniosku (21 dni przed końcem urlopu
+        # macierzyńskiego, Kodeks pracy art. 1802 §4), nie do wymiaru tego świadczenia
+        # (ten pochodzi z child_hospitalization_weeks, patrz engine.py).
+        weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
         duration_until_birth=False,
         debt_threshold_percent_of_min_wage=Decimal("1.00"),
         min_wage_reference_zl=Decimal("4806.00"),
@@ -595,15 +599,20 @@ def _ensure_supplementary_maternity_leave_seeded(db: Session) -> None:
             "chorobowego) albo ZUS"
         ),
         deadlines=[
-            "Wniosek o uzupełniający urlop macierzyński - najpóźniej do granicznego "
-            "tygodnia po porodzie (15. albo 8., zależnie od okoliczności urodzenia); "
-            "po tym terminie prawo wygasa (Kodeks pracy art. 1802 §1).",
+            "Wniosek o uzupełniający urlop macierzyński - najpóźniej 21 dni przed "
+            "zakończeniem korzystania z podstawowego urlopu macierzyńskiego (Kodeks "
+            "pracy art. 1802 §4); po tym terminie prawo wygasa. Graniczny tydzień po "
+            "porodzie (15. albo 8., zależnie od okoliczności urodzenia) ogranicza "
+            "wyłącznie, które tygodnie hospitalizacji wlicza się do wymiaru urlopu "
+            "(art. 1802 §1 i §3), nie jest to termin na złożenie wniosku.",
         ],
         legal_basis=[
-            "Kodeks pracy art. 1802 §1 (1 tydzień urlopu za każdy tydzień hospitalizacji "
-            "dziecka po porodzie, limit do 15. tygodnia po porodzie przy urodzeniu "
-            "<28 tyg. ciąży lub masie ≤1000g, albo do 8. tygodnia po porodzie w "
-            "pozostałych kwalifikujących przypadkach)",
+            "Kodeks pracy art. 1802 §1 i §3 (1 tydzień urlopu za każdy tydzień "
+            "hospitalizacji dziecka po porodzie, liczony do 15. tygodnia po porodzie "
+            "przy urodzeniu <28 tyg. ciąży lub masie ≤1000g, albo do 8. tygodnia po "
+            "porodzie w pozostałych kwalifikujących przypadkach)",
+            "Kodeks pracy art. 1802 §4 (wniosek składany najpóźniej 21 dni przed "
+            "zakończeniem urlopu macierzyńskiego)",
             "ustawa zasiłkowa art. 29 ust. 1 pkt 1 i art. 31 ust. 1 (100% podstawy "
             "wymiaru, jak zwykły zasiłek macierzyński)",
             "ustawa zasiłkowa art. 2a (wyłączenie prawa z powodu zadłużenia składkowego)",
@@ -781,8 +790,7 @@ def _ensure_stillbirth_funeral_benefit_seeded(db: Session) -> None:
             {
                 "code": "akt_martwego_urodzenia",
                 "name": (
-                    "Zaświadczenie o martwym urodzeniu (gdy brak adnotacji w akcie "
-                    "urodzenia)"
+                    "Zaświadczenie o martwym urodzeniu (gdy brak adnotacji w akcie urodzenia)"
                 ),
                 "when": "wraz z wnioskiem, jeśli dotyczy",
                 "applies_to": None,
