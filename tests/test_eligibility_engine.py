@@ -25,12 +25,6 @@ def _make_rule() -> BenefitRuleVersion:
         required_documents=[
             {"code": "x", "name": "Wniosek", "when": "przed urlopem", "applies_to": None},
             {"code": "z3", "name": "Zaświadczenie Z-3", "when": "...", "applies_to": "standard"},
-            {
-                "code": "z3a",
-                "name": "Zaświadczenie Z-3a",
-                "when": "...",
-                "applies_to": "self_employed",
-            },
         ],
     )
 
@@ -193,7 +187,10 @@ def test_plan_documents_use_z3_for_unknown_insurance_title() -> None:
     assert "z3a" not in codes
 
 
-def test_plan_documents_use_z3a_for_self_employed() -> None:
+def test_plan_documents_omit_z3_for_self_employed() -> None:
+    """Self-employed-like titles get no zaświadczenie płatnika document at all: Z-3
+    doesn't apply (no employer), and Z-3b (what they used to file) was abolished
+    2026-10-24 with no documented replacement - we must not invent one."""
     rule = _make_rule()
     request = MaternityLeaveEligibilityRequest(
         children_count=1,
@@ -205,5 +202,28 @@ def test_plan_documents_use_z3a_for_self_employed() -> None:
     result = evaluate_maternity_leave_eligibility(request, rule)
 
     codes = {doc.code for doc in result.plan.required_documents}
-    assert "z3a" in codes
     assert "z3" not in codes
+    assert codes == {"x"}
+
+
+def test_self_employed_gets_z3b_replacement_warning() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        insurance_title=InsuranceTitle.dzialalnosc_gospodarcza,
+        debt_amount_zl=Decimal("10.00"),
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert any("Z-3b" in w for w in result.warnings)
+
+
+def test_non_self_employed_has_no_z3b_warning() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=True)
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.warnings == []

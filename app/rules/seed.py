@@ -58,9 +58,12 @@ def ensure_seeded(db: Session) -> None:
         # engine to pick the right document set given request.insurance_title; it is
         # never exposed on the public RequiredDocument schema. None/missing = always
         # required. "standard" = non-self-employed titles (umowa_o_prace, unknown) -
-        # the employer issues Z-3. "self_employed" = self-employed-like titles
-        # (dzialalnosc_gospodarcza) - there is no employer to issue Z-3, so Z-3a is
-        # required instead (mock/placeholder content; official text TBD).
+        # the employer issues Z-3. Self-employed-like titles (dzialalnosc_gospodarcza)
+        # get NO zaświadczenie płatnika document here: they historically filed Z-3b,
+        # which was abolished 2026-10-24 with no replacement documented in any source
+        # material we have (see project memory project-ebobo-legal-rules, point 3) -
+        # per the project's "never fabricate" rule we don't invent one. The engine
+        # adds a `warnings` entry instead of guessing a document code.
         required_documents=[
             {
                 "code": "wniosek_urlop_macierzynski",
@@ -79,15 +82,6 @@ def ensure_seeded(db: Session) -> None:
                 "name": "Zaświadczenie płatnika składek Z-3",
                 "when": "gdy płatnikiem zasiłku jest ZUS, a nie pracodawca",
                 "applies_to": "standard",
-            },
-            {
-                "code": "zaswiadczenie_z3a",
-                "name": "Zaświadczenie płatnika składek Z-3a",
-                "when": (
-                    "dla osób prowadzących pozarolniczą działalność gospodarczą - brak "
-                    "pracodawcy, więc zaświadczenie wystawia się samodzielnie na formularzu Z-3a"
-                ),
-                "applies_to": "self_employed",
             },
             {
                 "code": "akt_urodzenia",

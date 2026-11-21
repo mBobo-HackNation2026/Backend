@@ -38,8 +38,9 @@ def _document_applies(doc: dict, is_self_employed: bool) -> bool:
 
     ``applies_to`` is an internal seed-data-only tag (never exposed on the public
     ``RequiredDocument`` schema): ``None``/missing means "always", "standard" means
-    non-self-employed titles (employer issues Z-3), "self_employed" means
-    self-employed-like titles (Z-3a, since there is no employer to issue Z-3).
+    non-self-employed titles (employer issues Z-3). Self-employed-like titles get no
+    "self_employed"-tagged document today (see ``app/rules/seed.py`` for why), but the
+    tag is kept generic so a future rule version can add one without an engine change.
     """
     applies_to = doc.get("applies_to")
     if applies_to is None:
@@ -151,6 +152,15 @@ def evaluate_maternity_leave_eligibility(
     else:
         status = EligibilityStatus.likely_eligible
 
+    warnings: list[str] = []
+    if request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES:
+        warnings.append(
+            "Osoby prowadzące pozarolniczą działalność gospodarczą składały dotąd "
+            "zaświadczenie Z-3b, które zniesiono 2026-10-24 bez oficjalnie "
+            "potwierdzonego zastąpienia w dostępnych źródłach - sprawdź aktualny "
+            "formularz ZAM/eZUS przed złożeniem wniosku."
+        )
+
     plan = None
     # Only populate the plan when the *standard* path is still viable: either
     # everything is confirmed (likely_eligible), or nothing has been confirmed as
@@ -197,4 +207,5 @@ def evaluate_maternity_leave_eligibility(
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
+        warnings=warnings,
     )
