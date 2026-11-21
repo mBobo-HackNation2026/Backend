@@ -22,7 +22,16 @@ def _make_rule() -> BenefitRuleVersion:
         debt_threshold_percent_of_min_wage=Decimal("1.00"),
         min_wage_reference_zl=Decimal("4806.00"),
         legal_basis=["ustawa zasiłkowa art. 29"],
-        required_documents=[{"code": "x", "name": "Wniosek", "when": "przed urlopem"}],
+        required_documents=[
+            {"code": "x", "name": "Wniosek", "when": "przed urlopem", "applies_to": None},
+            {"code": "z3", "name": "Zaświadczenie Z-3", "when": "...", "applies_to": "standard"},
+            {
+                "code": "z3a",
+                "name": "Zaświadczenie Z-3a",
+                "when": "...",
+                "applies_to": "self_employed",
+            },
+        ],
     )
 
 
@@ -76,6 +85,29 @@ def test_not_insured_due_to_employer_liquidation_requires_verification() -> None
         s.type == SolutionType.alternative_benefit and "art. 30" in (s.legal_basis or "")
         for s in result.possible_solutions
     )
+    # The confirmed unmet condition means the *standard* plan (20-week post-birth
+    # leave) no longer applies - the art. 30 alternative has no plan of its own yet,
+    # so possible_solutions is the only place it is described.
+    assert result.plan is None
+
+
+def test_confirmed_no_basis_with_unrelated_missing_data_has_no_plan() -> None:
+    """unmet_conditions is non-empty (confirmed: no basis for the standard benefit),
+    but an unrelated missing field (debt info) still bumps status to
+    requires_verification. The plan must stay None - we must not show the standard
+    plan once the standard condition has failed."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=False,
+        insurance_title=InsuranceTitle.dzialalnosc_gospodarcza,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.unmet_conditions
+    assert result.plan is None
 
 
 def test_unknown_insurance_status_requires_verification_with_missing_data() -> None:
@@ -86,6 +118,9 @@ def test_unknown_insurance_status_requires_verification_with_missing_data() -> N
 
     assert result.status == EligibilityStatus.requires_verification
     assert result.missing_data
+    # Nothing has been confirmed as failed yet (unmet_conditions is empty) - the
+    # standard path is still fully open, so the plan should still be shown.
+    assert result.plan is not None
 
 
 def test_self_employed_with_debt_over_threshold_is_not_eligible() -> None:
@@ -130,3 +165,45 @@ def test_self_employed_missing_debt_info_requires_verification() -> None:
 
     assert result.status == EligibilityStatus.requires_verification
     assert result.missing_data
+
+
+def test_plan_documents_use_z3_for_umowa_o_prace() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    codes = {doc.code for doc in result.plan.required_documents}
+    assert "z3" in codes
+    assert "z3a" not in codes
+
+
+def test_plan_documents_use_z3_for_unknown_insurance_title() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=True)
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    codes = {doc.code for doc in result.plan.required_documents}
+    assert "z3" in codes
+    assert "z3a" not in codes
+
+
+def test_plan_documents_use_z3a_for_self_employed() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        insurance_title=InsuranceTitle.dzialalnosc_gospodarcza,
+        debt_amount_zl=Decimal("10.00"),
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    codes = {doc.code for doc in result.plan.required_documents}
+    assert "z3a" in codes
+    assert "z3" not in codes

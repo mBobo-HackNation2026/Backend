@@ -18,9 +18,12 @@ from app.eligibility.schemas import (
     RequiredDocument,
     SolutionType,
 )
-
-BENEFIT_CODE = "zasilek_macierzynski_urlop_macierzynski"
-BENEFIT_NAME = "Zasiłek macierzyński za okres urlopu macierzyńskiego"
+from app.rules.seed import (
+    MATERNITY_LEAVE_BENEFIT_CODE as BENEFIT_CODE,
+)
+from app.rules.seed import (
+    MATERNITY_LEAVE_BENEFIT_NAME as BENEFIT_NAME,
+)
 
 _SELF_EMPLOYED_LIKE_TITLES = {InsuranceTitle.dzialalnosc_gospodarcza}
 
@@ -28,6 +31,24 @@ _SELF_EMPLOYED_LIKE_TITLES = {InsuranceTitle.dzialalnosc_gospodarcza}
 def _weeks_for_children_count(weeks_by_child_count: dict, children_count: int) -> int:
     key = str(children_count) if children_count < 5 else "5+"
     return weeks_by_child_count[key]
+
+
+def _document_applies(doc: dict, is_self_employed: bool) -> bool:
+    """Whether a seed-data required-document entry applies to this request.
+
+    ``applies_to`` is an internal seed-data-only tag (never exposed on the public
+    ``RequiredDocument`` schema): ``None``/missing means "always", "standard" means
+    non-self-employed titles (employer issues Z-3), "self_employed" means
+    self-employed-like titles (Z-3a, since there is no employer to issue Z-3).
+    """
+    applies_to = doc.get("applies_to")
+    if applies_to is None:
+        return True
+    if applies_to == "self_employed":
+        return is_self_employed
+    if applies_to == "standard":
+        return not is_self_employed
+    return True
 
 
 def evaluate_maternity_leave_eligibility(
@@ -131,8 +152,26 @@ def evaluate_maternity_leave_eligibility(
         status = EligibilityStatus.likely_eligible
 
     plan = None
-    if status != EligibilityStatus.not_eligible:
+    # Only populate the plan when the *standard* path is still viable: either
+    # everything is confirmed (likely_eligible), or nothing has been confirmed as
+    # failed yet and we're just missing data (requires_verification with no
+    # unmet_conditions). Once a standard condition is confirmed unmet - whether
+    # that lands on not_eligible, or on requires_verification because an
+    # alternative path (e.g. art. 30) exists, or because unrelated missing data
+    # happens to bump the status - the standard plan no longer applies and must
+    # stay None. A confirmed alternative path has no BenefitRuleVersion of its own
+    # yet, so possible_solutions is the only place it is described for now.
+    is_standard_path_open = status == EligibilityStatus.likely_eligible or (
+        status == EligibilityStatus.requires_verification and not unmet_conditions
+    )
+    if is_standard_path_open:
         weeks = _weeks_for_children_count(rule.weeks_by_child_count, request.children_count)
+        is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
+        required_documents = [
+            RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
+            for doc in rule.required_documents
+            if _document_applies(doc, is_self_employed)
+        ]
         plan = BenefitPlan(
             weeks=weeks,
             rate_percentage=rule.rate_percentage,
@@ -140,7 +179,7 @@ def evaluate_maternity_leave_eligibility(
                 "Pracodawca (jeśli zgłasza powyżej 20 ubezpieczonych do ubezpieczenia "
                 "chorobowego) albo ZUS"
             ),
-            required_documents=[RequiredDocument(**doc) for doc in rule.required_documents],
+            required_documents=required_documents,
             deadlines=[
                 "Wniosek o urlop macierzyński - przed rozpoczęciem korzystania z urlopu (lub "
                 "łącznie z wnioskiem o urlop rodzicielski)",
