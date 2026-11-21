@@ -325,10 +325,11 @@ def _ensure_parental_leave_seeded(db: Session) -> None:
         is_current=True,
         effective_from=date(2026, 1, 1),
         effective_to=None,
-        # Standardowa stawka 70%; silnik (evaluate_parental_leave_eligibility) podnosi
-        # ją do 81,5% dynamicznie, gdy wniosek o pełny wymiar złożono w ciągu 21 dni po
-        # porodzie (ustawa zasiłkowa art. 31 ust. 3g) - to jedyny przypadek w projekcie,
-        # gdzie stawka nie jest stałą wartością z reguły.
+        # Standardowa stawka 70% (ustawa zasiłkowa art. 31 ust. 2); silnik
+        # (evaluate_parental_leave_eligibility) podnosi ją do 81,5% dynamicznie, gdy
+        # wniosek o pełny wymiar złożono w ciągu 21 dni po porodzie (art. 30a i ustawa
+        # zasiłkowa art. 31 ust. 3) - to jedyny przypadek w projekcie, gdzie stawka nie
+        # jest stałą wartością z reguły.
         rate_percentage=Decimal("70.00"),
         weeks_by_child_count={"1": 41, "2": 43, "3": 43, "4": 43, "5+": 43},
         weeks_by_child_count_za_zyciem={"1": 65, "2": 67, "3": 67, "4": 67, "5+": 67},
@@ -344,12 +345,14 @@ def _ensure_parental_leave_seeded(db: Session) -> None:
             "tym terminem przysługuje stawka 70%.",
         ],
         legal_basis=[
-            "Kodeks pracy art. 1821 i nast. (urlop rodzicielski - 41/43 tygodni, 65/67 "
+            "Kodeks pracy art. 1821a § 1-2 (urlop rodzicielski - 41/43 tygodni, 65/67 "
             "tygodni z zaświadczeniem 'Za życiem')",
-            "Kodeks pracy art. 1821a (9 tygodni z puli nieprzenoszalne na rzecz drugiego "
-            "rodzica)",
-            "ustawa zasiłkowa art. 31 ust. 3 (stawka 70%) oraz ust. 3g i ust. 4 (81,5% "
-            "łącznie z macierzyńskim pod warunkiem wniosku o pełny wymiar w ciągu 21 dni)",
+            "Kodeks pracy art. 1821a § 4 (9 tygodni z puli nieprzenoszalne na rzecz "
+            "drugiego rodzica)",
+            "ustawa zasiłkowa art. 31 ust. 2 (stawka standardowa 70%)",
+            "art. 30a i ustawa zasiłkowa art. 31 ust. 3 (stawka 81,5% łącznie z "
+            "macierzyńskim, pod warunkiem wniosku o pełny wymiar w ciągu 21 dni) oraz "
+            "ust. 3f (9 nieprzenoszalnych tygodni drugiego rodzica zawsze płatne 70%)",
             "Kodeks pracy art. 1821f (łączenie urlopu rodzicielskiego z pracą w wymiarze "
             "nie wyższym niż 1/2 etatu, proporcjonalne wydłużenie urlopu)",
         ],

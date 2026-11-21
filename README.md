@@ -156,16 +156,17 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     `bonus_type`, `months_since_last_benefit` istnieją w requestcie, ale
     podstawa wymiaru ich jeszcze nie uwzględnia (niuanse art. 37/38/42/43) -
     to realny, niedokończony zakres, nie kosmetyka.
-  - **Znaleziony, jeszcze niepoprawiony błąd cytowania**: przy weryfikacji
-    stawki 81,5%/70% urlopu rodzicielskiego przeciwko treści ustawy okazało
-    się, że istniejący cytat w `evaluate_parental_leave_eligibility`/
-    `_ensure_parental_leave_seeded` ("art. 31 ust. 3g i ust. 4") jest błędny -
-    poprawne są art. 30a + art. 31 ust. 3 (stawka 81,5%) i ust. 3f (9
-    nieprzenoszalnych tygodni drugiego rodzica zawsze 70%); ust. 3g to inna,
-    niezwiązana zasada (powrót do 70% przy niewykorzystaniu ani jednego dnia
-    w pierwszym roku życia dziecka). Logika działania jest poprawna, same
-    cytaty wymagają małej poprawki - zob. pamięć projektu
-    `project-ebobo-calculator`.
+  - **Poprawka cytowań**: weryfikacja stawki 81,5%/70% urlopu rodzicielskiego
+    przeciwko treści ustawy wykazała błędne cytaty w
+    `evaluate_parental_leave_eligibility`/`_ensure_parental_leave_seeded`
+    ("art. 31 ust. 3g i ust. 4" dla stawki 81,5% oraz "ust. 3" dla
+    tygodni "Za życiem") - poprawione na: art. 30a + ustawa zasiłkowa art. 31
+    ust. 3 (stawka 81,5%), ust. 2 (stawka standardowa 70%), ust. 3f (9
+    nieprzenoszalnych tygodni drugiego rodzica zawsze 70%), Kodeks pracy
+    art. 1821a § 2/§ 4 (wymiar tygodni i nieprzenoszalna rezerwacja - to
+    kwestia Kodeksu pracy, nie ustawy zasiłkowej). Logika działania była od
+    początku poprawna, poprawione zostały tylko cytaty. Szczegóły w pamięci
+    projektu `project-ebobo-calculator`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 

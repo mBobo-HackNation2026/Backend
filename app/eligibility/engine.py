@@ -499,7 +499,7 @@ def evaluate_parental_leave_eligibility(
         if request.za_zyciem_certificate:
             met_conditions.append(
                 f"zaświadczenie 'Za życiem' - wydłużony wymiar urlopu rodzicielskiego do "
-                f"{total_pool} tygodni (ustawa zasiłkowa art. 31 ust. 3)"
+                f"{total_pool} tygodni (Kodeks pracy art. 1821a § 2)"
             )
 
     weeks_for_applicant: int | None = None
@@ -517,13 +517,13 @@ def evaluate_parental_leave_eligibility(
             unmet_conditions.append(
                 "pula urlopu rodzicielskiego dostępna dla wnioskującego rodzica została "
                 "wyczerpana - 9 tygodni z puli jest nieprzenoszalne na rzecz drugiego "
-                "rodzica (Kodeks pracy art. 1821a)"
+                "rodzica (Kodeks pracy art. 1821a § 4)"
             )
         else:
             met_conditions.append(
                 f"dostępne {weeks_for_applicant} tyg. urlopu rodzicielskiego po "
                 "uwzględnieniu nieprzenoszalnych 9 tygodni drugiego rodzica (Kodeks "
-                "pracy art. 1821a)"
+                "pracy art. 1821a § 4)"
             )
 
     rate_percentage: Decimal | None = None
@@ -535,18 +535,20 @@ def evaluate_parental_leave_eligibility(
     elif request.full_dose_claimed_within_21_days:
         rate_percentage = _PARENTAL_LEAVE_FULL_DOSE_RATE_PERCENT
         met_conditions.append(
-            "wniosek o pełny wymiar złożony w ciągu 21 dni po porodzie - stawka 81,5% "
-            "łącznie z zasiłkiem macierzyńskim (ustawa zasiłkowa art. 31 ust. 3g)"
+            "wniosek o pełny wymiar złożony w ciągu 21 dni po porodzie (art. 30a) - "
+            "stawka 81,5% łącznie z zasiłkiem macierzyńskim (ustawa zasiłkowa art. 31 "
+            "ust. 3)"
         )
         warnings.append(
             "Stawka 81,5% dotyczy łącznego rozliczenia z zasiłkiem macierzyńskim za cały "
             "okres i nie obejmuje nieprzenoszalnych 9 tygodni drugiego rodzica, które są "
-            "zawsze płatne 70% - zweryfikuj dokładne rozliczenie z ZUS/pracodawcą."
+            "zawsze płatne 70% (ustawa zasiłkowa art. 31 ust. 3f) - zweryfikuj dokładne "
+            "rozliczenie z ZUS/pracodawcą."
         )
     else:
         rate_percentage = rule.rate_percentage
         met_conditions.append(
-            "stawka standardowa 70% podstawy wymiaru (ustawa zasiłkowa art. 31 ust. 3)"
+            "stawka standardowa 70% podstawy wymiaru (ustawa zasiłkowa art. 31 ust. 2)"
         )
 
     part_time_fraction = request.part_time_fraction_during_parental_leave
