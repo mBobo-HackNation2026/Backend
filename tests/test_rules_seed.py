@@ -1,0 +1,49 @@
+from app.db.models.benefit_rule import BenefitRuleVersion, BenefitType
+from app.db.session import SessionLocal
+from app.rules.seed import MATERNITY_LEAVE_BENEFIT_CODE, ensure_seeded
+
+
+def test_ensure_seeded_creates_exactly_one_current_rule() -> None:
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+        ensure_seeded(db)  # must be idempotent
+
+        count = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == MATERNITY_LEAVE_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
+            )
+            .count()
+        )
+        assert count == 1
+    finally:
+        db.close()
+
+
+def test_seeded_rule_has_z3_for_standard_and_none_for_self_employed() -> None:
+    """Z-3 is tagged "standard" (non-self-employed titles only). Self-employed-like
+    titles historically filed Z-3b, abolished 2026-10-24 with no documented
+    replacement - per the project's "never fabricate" rule, no document is seeded
+    for them; the engine surfaces a warning instead (see test_eligibility_engine.py)."""
+    db = SessionLocal()
+    try:
+        ensure_seeded(db)
+
+        rule = (
+            db.query(BenefitRuleVersion)
+            .join(BenefitType)
+            .filter(
+                BenefitType.code == MATERNITY_LEAVE_BENEFIT_CODE,
+                BenefitRuleVersion.is_current.is_(True),
+            )
+            .one()
+        )
+        docs_by_code = {doc["code"]: doc for doc in rule.required_documents}
+
+        assert docs_by_code["zaswiadczenie_z3"]["applies_to"] == "standard"
+        assert "zaswiadczenie_z3a" not in docs_by_code
+    finally:
+        db.close()
