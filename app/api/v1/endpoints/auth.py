@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.auth.schemas import MobywatelLoginRequest, SessionResponse, UserProfile
-from app.auth.security import create_user_token, get_current_user
+from app.auth.security import create_user_token, get_current_user, get_user_for_refresh
 from app.db.models.user import AuthStatus, User
 from app.db.session import get_db
 
@@ -29,7 +29,7 @@ async def create_session(db: Session = Depends(get_db)) -> SessionResponse:
     db.commit()
     db.refresh(user)
 
-    token = create_user_token(user.id, user.status)
+    token = create_user_token(user.id, user.status, user.token_version)
     return SessionResponse(access_token=token, user_id=user.id, status=user.status)
 
 
@@ -51,7 +51,7 @@ async def mobywatel_login(
     db.commit()
     db.refresh(user)
 
-    token = create_user_token(user.id, user.status)
+    token = create_user_token(user.id, user.status, user.token_version)
     return SessionResponse(access_token=token, user_id=user.id, status=user.status)
 
 
@@ -64,3 +64,38 @@ async def me(user: User = Depends(get_current_user)) -> UserProfile:
         last_name=user.last_name,
         pesel=user.pesel,
     )
+
+
+@router.post(
+    "/refresh",
+    response_model=SessionResponse,
+    summary="Odśwież sesję (działa nawet gdy token już wygasł), zachowując ten sam user_id",
+)
+async def refresh_session(
+    user: User = Depends(get_user_for_refresh), db: Session = Depends(get_db)
+) -> SessionResponse:
+    token = create_user_token(user.id, user.status, user.token_version)
+    return SessionResponse(access_token=token, user_id=user.id, status=user.status)
+
+
+@router.post(
+    "/logout",
+    response_model=SessionResponse,
+    summary="Wyloguj (unieważnia bieżącą sesję) i wróć do nowej sesji anonimowej",
+)
+async def logout(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> SessionResponse:
+    # Bump token_version so every token issued for this user (access tokens already
+    # handed out, and anything that could still be silently refreshed via
+    # /auth/refresh) stops validating from this point on.
+    user.token_version += 1
+    db.commit()
+
+    new_user = User(status=AuthStatus.anonymous)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    token = create_user_token(new_user.id, new_user.status, new_user.token_version)
+    return SessionResponse(access_token=token, user_id=new_user.id, status=new_user.status)
