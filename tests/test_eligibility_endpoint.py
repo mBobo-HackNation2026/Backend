@@ -124,6 +124,47 @@ def test_check_eligibility_paternity_leave_not_eligible_after_deadline(
     assert body["plan"] is None
 
 
+def test_check_eligibility_accepts_full_expanded_request_schema(client: TestClient) -> None:
+    """The input schema was expanded (waiting periods, hospitalization, adoption/foster
+    care, parental leave split, rehabilitation benefit, stillbirth, podstawa wymiaru) so
+    the frontend survey can collect everything up front - confirm every new field is
+    accepted (no 422) even though most stub evaluators don't read them yet."""
+    response = client.post(
+        f"/api/v1/eligibility/check/{PATERNITY_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "insured_at_birth": True,
+            "insurance_title": "umowa_o_prace",
+            "insured_days_continuous": 45,
+            "child_hospitalization_weeks": 2,
+            "gestational_week_at_birth": 36,
+            "birth_weight_grams": 2200,
+            "postpartum_weeks_elapsed": 5,
+            "is_adoption_or_foster_care": False,
+            "foster_care_type": None,
+            "child_age_years": 3,
+            "school_obligation_deferred": False,
+            "za_zyciem_certificate": False,
+            "full_dose_claimed_within_21_days": True,
+            "other_parent_used_parental_leave_weeks": 4,
+            "part_time_fraction_during_parental_leave": "0.5",
+            "sickness_benefit_period_exhausted": False,
+            "medical_prognosis_recovery_possible": True,
+            "excluded_from_rehabilitation_benefit": False,
+            "is_stillbirth_or_infant_death": False,
+            "days_since_death": None,
+            "average_monthly_income_zl": "5500.00",
+            "employment_duration_months": 18,
+            "voluntary_contribution_base_zl": None,
+            "bonus_type": "kwartalna",
+            "months_since_last_benefit": "0.5",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["benefit_code"] == PATERNITY_LEAVE_CODE
+
+
 def test_stub_benefits_are_registered_and_return_requires_verification(
     client: TestClient,
 ) -> None:
