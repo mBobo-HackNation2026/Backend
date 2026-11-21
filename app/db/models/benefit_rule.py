@@ -1,7 +1,32 @@
+"""Wersjonowane reguły świadczeń.
+
+Konwencja wersjonowania (jedna linia na pole):
+- ``version``: rosnący numer wersji reguły w obrębie jednego typu świadczenia.
+- ``effective_from`` / ``effective_to``: zakres dat, w którym reguła obowiązuje
+  (``effective_to`` = ``None`` oznacza brak końca obowiązywania).
+- ``is_current``: znacznik wersji aktualnie używanej; co najwyżej jeden wiersz
+  na ``benefit_type_id`` może mieć ``is_current=True`` (wymusza indeks częściowy).
+
+Para ``(benefit_type_id, version)`` jest unikalna (wymusza ``UniqueConstraint``).
+"""
+
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,6 +45,15 @@ class BenefitType(Base):
 
 class BenefitRuleVersion(Base):
     __tablename__ = "benefit_rule_versions"
+    __table_args__ = (
+        UniqueConstraint("benefit_type_id", "version", name="uq_benefit_rule_version"),
+        Index(
+            "uq_benefit_rule_current",
+            "benefit_type_id",
+            unique=True,
+            sqlite_where=text("is_current = 1"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     benefit_type_id: Mapped[int] = mapped_column(ForeignKey("benefit_types.id"))
