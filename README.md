@@ -178,6 +178,36 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     kwestia Kodeksu pracy, nie ustawy zasiłkowej). Logika działania była od
     początku poprawna, poprawione zostały tylko cytaty. Szczegóły w pamięci
     projektu `project-ebobo-calculator`.
+- **MockZUSProvider** (`app/mock_zus/`) — **nowość**, priorytet #4 z recenzji FE
+  2026-11-22. Kontrakt endpointów zaproponowano i zatwierdzono z użytkownikiem
+  PRZED implementacją (żeby FE mogło budować UI równolegle), zgodnie z
+  wyraźną prośbą w briefie. Dane symulowane, całkowicie oddzielone od
+  silnika uprawnień i kalkulatora - nigdy nie są automatycznie wstrzykiwane
+  do oceny, żeby nie zastępować bez wyjaśnienia deklaracji użytkownika.
+  - `GET /api/v1/mock-zus/profiles` — lista 5 profili demonstracyjnych
+    (`profile_id`, `label`, opis) do ekranu wyboru sprawy.
+  - `GET /api/v1/mock-zus/profiles/{profile_id}` — pełne symulowane dane:
+    status i tytuł ubezpieczenia, okresy ubezpieczenia, zadłużenie składkowe,
+    e-ZLA, historia wykorzystanych świadczeń. Zawsze z
+    `data_source: "mock_zus_simulated"` i jawnym ostrzeżeniem, że to nie są
+    prawdziwe dane ZUS.
+  - `POST /api/v1/mock-zus/profiles/{profile_id}/compare` — przyjmuje
+    deklaracje użytkownika (tytuł ubezpieczenia, status ubezpieczenia,
+    zadłużenie), zwraca porównanie pole-po-polu (`declared_value` /
+    `simulated_value` / `matches`) - `matches: null`, gdy jednej ze stron
+    brakuje wartości (odróżnia "sprawdziliśmy i się nie zgadza" od "nie ma
+    czego porównać"). To bezpośrednia realizacja wymogu z briefu: przy
+    rozbieżności pokazać oba źródła, nigdy nie decydować które jest
+    "prawdziwe".
+  - 5 profili (`matka_umowa_o_prace_standard`, `zlecenie_okres_wyczekiwania`,
+    `upadlosc_pracodawcy`, `dzialalnosc_z_zadluzeniem`,
+    `ojciec_urlop_ojcowski`) - każdy świadomie dobrany, żeby realnie
+    uruchomić konkretną, już zaimplementowaną ścieżkę silnika uprawnień (okres
+    wyczekiwania, art. 30, próg zadłużenia art. 2a, termin urlopu ojcowskiego),
+    nie losowe dane. Dane statyczne w Pythonie (`app/mock_zus/profiles.py`),
+    bez tabeli w bazie - to dane demonstracyjne, nie parametry prawne
+    wymagające wersjonowania jak `BenefitRuleVersion`.
+  - Zob. pamięć projektu `project-ebobo-mock-zus-provider`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 
@@ -227,7 +257,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 1 | **Rozbudowa formularzy wejściowych** — konkretne pytania ustalające sytuację rodzica (zasila wszystko poniżej) | ✅ zrobione (schemat w `app/eligibility/schemas.py`, patrz "Zrobione" wyżej) |
 | 2 | Dopracowanie silnika uprawnień (urlop rodzicielski, zasiłek chorobowy w ciąży, świadczenie rehabilitacyjne - nowe świadczenie, uzupełniający urlop macierzyński, adopcja/rodzina zastępcza, zasiłek pogrzebowy przy martwym urodzeniu) | ✅ zrobione - wszystkie 9 świadczeń mają realną logikę, patrz "Zrobione" wyżej |
 | 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ✅ zrobione - kwoty per świadczenie + porównanie wariantów urlopu rodzicielskiego, patrz "Zrobione" wyżej; pola podstawy wymiaru dla zatrudnienia <12 mies./premii/przerwy między zasiłkami jeszcze nieobsłużone |
-| 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ⬜ nierozpoczęte |
+| 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ✅ zrobione - 5 profili + endpoint porównania rozbieżności, patrz "Zrobione" wyżej |
 | 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |
 | 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ⬜ nierozpoczęte |
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
