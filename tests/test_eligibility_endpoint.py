@@ -35,6 +35,12 @@ def test_check_eligibility_requires_verification_when_insurance_status_missing(
     body = response.json()
     assert body["status"] == "requires_verification"
     assert body["missing_data"]
+    assert body["missing_fields"] == [
+        {
+            "field": "insured_at_birth",
+            "message": "status ubezpieczenia chorobowego w dniu porodu",
+        }
+    ]
 
 
 def test_check_eligibility_rejects_zero_children_count(client: TestClient) -> None:

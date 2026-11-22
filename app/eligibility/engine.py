@@ -15,6 +15,7 @@ from app.eligibility.schemas import (
     FosterCareType,
     InsuranceTitle,
     MaternityLeaveEligibilityRequest,
+    MissingFieldInfo,
     PossibleSolution,
     RequiredDocument,
     SolutionType,
@@ -52,6 +53,31 @@ _SELF_EMPLOYED_LIKE_TITLES = {InsuranceTitle.dzialalnosc_gospodarcza}
 _VOLUNTARY_INSURANCE_TITLES = {InsuranceTitle.zlecenie, InsuranceTitle.dzialalnosc_gospodarcza}
 
 
+def _missing(
+    missing_data: list[str], missing_fields: list[MissingFieldInfo], field: str, message: str
+) -> None:
+    """Records a missing-data message together with the stable request field name it
+    corresponds to, so ``missing_data`` (free text) and ``missing_fields`` (stable
+    identifiers) can never drift out of sync - every call site provides both at once
+    instead of appending to ``missing_data`` directly."""
+    missing_data.append(message)
+    missing_fields.append(MissingFieldInfo(field=field, message=message))
+
+
+def _missing_many(
+    missing_data: list[str],
+    missing_fields: list[MissingFieldInfo],
+    fields: list[str],
+    message: str,
+) -> None:
+    """Like ``_missing``, but for a single message that depends on more than one
+    field - appends ``message`` once to ``missing_data`` and one ``MissingFieldInfo``
+    per field (same message repeated), so each field still gets its own stable id."""
+    missing_data.append(message)
+    for field in fields:
+        missing_fields.append(MissingFieldInfo(field=field, message=message))
+
+
 def _weeks_for_children_count(weeks_by_child_count: dict, children_count: int) -> int:
     key = str(children_count) if children_count < 5 else "5+"
     return weeks_by_child_count[key]
@@ -87,6 +113,7 @@ def _apply_self_employed_debt_check(
     unmet_conditions: list[str],
     missing_data: list[str],
     solutions: list[PossibleSolution],
+    missing_fields: list[MissingFieldInfo],
 ) -> None:
     """Shared art. 2a debt-threshold check (self-employed-like titles only).
 
@@ -96,8 +123,11 @@ def _apply_self_employed_debt_check(
     if request.insurance_title not in _SELF_EMPLOYED_LIKE_TITLES:
         return
     if request.debt_amount_zl is None:
-        missing_data.append(
-            "informacja o zadłużeniu składkowym na dzień powstania prawa do zasiłku"
+        _missing(
+            missing_data,
+            missing_fields,
+            "debt_amount_zl",
+            "informacja o zadłużeniu składkowym na dzień powstania prawa do zasiłku",
         )
         return
     threshold = rule.min_wage_reference_zl * rule.debt_threshold_percent_of_min_wage / Decimal(100)
@@ -165,10 +195,16 @@ def evaluate_maternity_leave_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
 
     if request.insured_at_birth is None:
-        missing_data.append("status ubezpieczenia chorobowego w dniu porodu")
+        _missing(
+            missing_data,
+            missing_fields,
+            "insured_at_birth",
+            "status ubezpieczenia chorobowego w dniu porodu",
+        )
     elif request.insured_at_birth:
         met_conditions.append(
             "ubezpieczenie chorobowe w dniu porodu (ustawa zasiłkowa art. 29 ust. 1 pkt 1)"
@@ -231,7 +267,7 @@ def evaluate_maternity_leave_eligibility(
             )
 
     _apply_self_employed_debt_check(
-        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions, missing_fields
     )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -265,6 +301,7 @@ def evaluate_maternity_leave_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -278,11 +315,17 @@ def evaluate_alternative_maternity_benefit_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     if request.insured_at_birth is None:
-        missing_data.append("status ubezpieczenia chorobowego w dniu porodu")
+        _missing(
+            missing_data,
+            missing_fields,
+            "insured_at_birth",
+            "status ubezpieczenia chorobowego w dniu porodu",
+        )
     elif request.insured_at_birth:
         unmet_conditions.append(
             "świadczenie dotyczy wyłącznie osób, których ubezpieczenie chorobowe ustało w "
@@ -301,7 +344,12 @@ def evaluate_alternative_maternity_benefit_eligibility(
             )
         )
     elif request.employment_ended_reason is None:
-        missing_data.append("powód ustania ubezpieczenia chorobowego w okresie ciąży")
+        _missing(
+            missing_data,
+            missing_fields,
+            "employment_ended_reason",
+            "powód ustania ubezpieczenia chorobowego w okresie ciąży",
+        )
     elif request.employment_ended_reason == EmploymentEndedReason.naruszenie_prawa_wyrokiem_sadu:
         # art. 30 ust. 3 (this benefit) only lists death/upadłość/likwidacja pracodawcy as
         # triggers - NOT unlawful termination by court ruling. That reason instead grants the
@@ -330,9 +378,12 @@ def evaluate_alternative_maternity_benefit_eligibility(
             "pracodawcy (ustawa zasiłkowa art. 30 ust. 3)"
         )
         if request.other_employment_secured is None:
-            missing_data.append(
+            _missing(
+                missing_data,
+                missing_fields,
+                "other_employment_secured",
                 "informacja, czy zapewniono inne zatrudnienie po ustaniu poprzedniego "
-                "(ustawa zasiłkowa art. 30 ust. 3)"
+                "(ustawa zasiłkowa art. 30 ust. 3)",
             )
         elif request.other_employment_secured:
             unmet_conditions.append(
@@ -362,6 +413,7 @@ def evaluate_alternative_maternity_benefit_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -378,10 +430,16 @@ def evaluate_paternity_leave_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
 
     if request.father_insured is None:
-        missing_data.append("status ubezpieczenia chorobowego ojca dziecka")
+        _missing(
+            missing_data,
+            missing_fields,
+            "father_insured",
+            "status ubezpieczenia chorobowego ojca dziecka",
+        )
     elif request.father_insured:
         met_conditions.append("ojciec dziecka objęty ubezpieczeniem chorobowym")
     else:
@@ -398,7 +456,7 @@ def evaluate_paternity_leave_eligibility(
         )
 
     if request.child_age_months is None:
-        missing_data.append("wiek dziecka w miesiącach")
+        _missing(missing_data, missing_fields, "child_age_months", "wiek dziecka w miesiącach")
     elif request.child_age_months >= _PATERNITY_LEAVE_DEADLINE_MONTHS:
         unmet_conditions.append(
             f"dziecko ukończyło {_PATERNITY_LEAVE_DEADLINE_MONTHS}. miesiąc życia - prawo "
@@ -420,6 +478,7 @@ def evaluate_paternity_leave_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -462,11 +521,17 @@ def evaluate_parental_leave_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     if request.insured_at_birth is None:
-        missing_data.append("status ubezpieczenia chorobowego wnioskującego rodzica")
+        _missing(
+            missing_data,
+            missing_fields,
+            "insured_at_birth",
+            "status ubezpieczenia chorobowego wnioskującego rodzica",
+        )
     elif request.insured_at_birth:
         met_conditions.append(
             "wnioskujący rodzic objęty ubezpieczeniem chorobowym (ustawa zasiłkowa "
@@ -487,7 +552,12 @@ def evaluate_parental_leave_eligibility(
 
     total_pool: int | None = None
     if request.za_zyciem_certificate is None:
-        missing_data.append("informacja o zaświadczeniu 'Za życiem'")
+        _missing(
+            missing_data,
+            missing_fields,
+            "za_zyciem_certificate",
+            "informacja o zaświadczeniu 'Za życiem'",
+        )
     else:
         table = (
             rule.weeks_by_child_count_za_zyciem
@@ -503,8 +573,11 @@ def evaluate_parental_leave_eligibility(
 
     weeks_for_applicant: int | None = None
     if request.other_parent_used_parental_leave_weeks is None:
-        missing_data.append(
-            "liczba tygodni urlopu rodzicielskiego już wykorzystanych przez drugiego rodzica"
+        _missing(
+            missing_data,
+            missing_fields,
+            "other_parent_used_parental_leave_weeks",
+            "liczba tygodni urlopu rodzicielskiego już wykorzystanych przez drugiego rodzica",
         )
     elif total_pool is not None:
         reserved_for_other_parent = max(
@@ -527,9 +600,12 @@ def evaluate_parental_leave_eligibility(
 
     rate_percentage: Decimal | None = None
     if request.full_dose_claimed_within_21_days is None:
-        missing_data.append(
+        _missing(
+            missing_data,
+            missing_fields,
+            "full_dose_claimed_within_21_days",
             "informacja, czy wniosek o pełny wymiar urlopu rodzicielskiego złożono w "
-            "ciągu 21 dni po porodzie (wpływa na stawkę zasiłku)"
+            "ciągu 21 dni po porodzie (wpływa na stawkę zasiłku)",
         )
     elif request.full_dose_claimed_within_21_days:
         rate_percentage = _PARENTAL_LEAVE_FULL_DOSE_RATE_PERCENT
@@ -588,6 +664,7 @@ def evaluate_parental_leave_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -626,11 +703,17 @@ def evaluate_sickness_benefit_during_pregnancy_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     if request.is_pregnant is None:
-        missing_data.append("status ciąży w okresie niezdolności do pracy")
+        _missing(
+            missing_data,
+            missing_fields,
+            "is_pregnant",
+            "status ciąży w okresie niezdolności do pracy",
+        )
     elif request.is_pregnant:
         met_conditions.append(
             "niezdolność do pracy powstała w okresie ciąży - stawka 100% i okres do 270 "
@@ -656,9 +739,12 @@ def evaluate_sickness_benefit_during_pregnancy_eligibility(
 
     required_waiting_days: int | None = None
     if request.insurance_title is None:
-        missing_data.append(
+        _missing(
+            missing_data,
+            missing_fields,
+            "insurance_title",
             "tytuł ubezpieczenia (potrzebny do ustalenia okresu wyczekiwania - 30 dni "
-            "przy ubezpieczeniu obowiązkowym, 90 dni przy dobrowolnym)"
+            "przy ubezpieczeniu obowiązkowym, 90 dni przy dobrowolnym)",
         )
     else:
         required_waiting_days = (
@@ -668,7 +754,12 @@ def evaluate_sickness_benefit_during_pregnancy_eligibility(
         )
 
     if request.insured_days_continuous is None:
-        missing_data.append("liczba dni nieprzerwanego ubezpieczenia chorobowego")
+        _missing(
+            missing_data,
+            missing_fields,
+            "insured_days_continuous",
+            "liczba dni nieprzerwanego ubezpieczenia chorobowego",
+        )
     elif required_waiting_days is not None:
         if request.insured_days_continuous >= required_waiting_days:
             met_conditions.append(
@@ -703,7 +794,7 @@ def evaluate_sickness_benefit_during_pregnancy_eligibility(
             )
 
     _apply_self_employed_debt_check(
-        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions, missing_fields
     )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -720,6 +811,7 @@ def evaluate_sickness_benefit_during_pregnancy_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -758,11 +850,17 @@ def evaluate_rehabilitation_benefit_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     if request.sickness_benefit_period_exhausted is None:
-        missing_data.append("czy wyczerpano maksymalny okres zasiłku chorobowego")
+        _missing(
+            missing_data,
+            missing_fields,
+            "sickness_benefit_period_exhausted",
+            "czy wyczerpano maksymalny okres zasiłku chorobowego",
+        )
     elif request.sickness_benefit_period_exhausted:
         met_conditions.append(
             "wyczerpano maksymalny okres zasiłku chorobowego (ustawa zasiłkowa art. 18 ust. 1)"
@@ -785,8 +883,11 @@ def evaluate_rehabilitation_benefit_eligibility(
         )
 
     if request.medical_prognosis_recovery_possible is None:
-        missing_data.append(
-            "czy lekarz orzecznik ZUS stwierdził rokowanie odzyskania zdolności do pracy"
+        _missing(
+            missing_data,
+            missing_fields,
+            "medical_prognosis_recovery_possible",
+            "czy lekarz orzecznik ZUS stwierdził rokowanie odzyskania zdolności do pracy",
         )
     elif request.medical_prognosis_recovery_possible:
         met_conditions.append(
@@ -810,9 +911,12 @@ def evaluate_rehabilitation_benefit_eligibility(
         )
 
     if request.excluded_from_rehabilitation_benefit is None:
-        missing_data.append(
+        _missing(
+            missing_data,
+            missing_fields,
+            "excluded_from_rehabilitation_benefit",
             "czy przysługuje już inne świadczenie wykluczające prawo do świadczenia "
-            "rehabilitacyjnego"
+            "rehabilitacyjnego",
         )
     elif request.excluded_from_rehabilitation_benefit:
         unmet_conditions.append(
@@ -840,7 +944,12 @@ def evaluate_rehabilitation_benefit_eligibility(
 
     rate_percentage: Decimal | None = None
     if request.is_pregnant is None:
-        missing_data.append("status ciąży (wpływa na stawkę: 100% zamiast 90%/75%)")
+        _missing(
+            missing_data,
+            missing_fields,
+            "is_pregnant",
+            "status ciąży (wpływa na stawkę: 100% zamiast 90%/75%)",
+        )
     elif request.is_pregnant:
         rate_percentage = _REHABILITATION_RATE_PREGNANT
         met_conditions.append(
@@ -856,7 +965,7 @@ def evaluate_rehabilitation_benefit_eligibility(
         )
 
     _apply_self_employed_debt_check(
-        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions, missing_fields
     )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -875,6 +984,7 @@ def evaluate_rehabilitation_benefit_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -935,12 +1045,18 @@ def evaluate_supplementary_maternity_leave_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     hospitalization_weeks_reported: int | None = None
     if request.child_hospitalization_weeks is None:
-        missing_data.append("liczba tygodni pobytu dziecka w szpitalu po porodzie")
+        _missing(
+            missing_data,
+            missing_fields,
+            "child_hospitalization_weeks",
+            "liczba tygodni pobytu dziecka w szpitalu po porodzie",
+        )
     elif request.child_hospitalization_weeks <= 0:
         unmet_conditions.append(
             "brak hospitalizacji dziecka po porodzie - uzupełniający urlop "
@@ -959,10 +1075,13 @@ def evaluate_supplementary_maternity_leave_eligibility(
     # osobno, §4, patrz niżej).
     cutoff_week: int | None = None
     if request.gestational_week_at_birth is None or request.birth_weight_grams is None:
-        missing_data.append(
+        _missing_many(
+            missing_data,
+            missing_fields,
+            ["gestational_week_at_birth", "birth_weight_grams"],
             "tydzień ciąży w dniu porodu i masa urodzeniowa dziecka (potrzebne do "
             "ustalenia, które tygodnie hospitalizacji się liczą: do 15. albo do 8. "
-            "tygodnia po porodzie)"
+            "tygodnia po porodzie)",
         )
     else:
         cutoff_week = _resolve_supplementary_leave_cutoff_week(
@@ -1003,9 +1122,12 @@ def evaluate_supplementary_maternity_leave_eligibility(
     # zakończeniem podstawowego urlopu macierzyńskiego (Kodeks pracy art. 1802 §4) -
     # niezależny od tygodnia granicznego powyżej.
     if request.postpartum_weeks_elapsed is None:
-        missing_data.append(
+        _missing(
+            missing_data,
+            missing_fields,
+            "postpartum_weeks_elapsed",
             "liczba tygodni, które upłynęły od porodu (potrzebna do ustalenia terminu "
-            "złożenia wniosku - art. 1802 §4)"
+            "złożenia wniosku - art. 1802 §4)",
         )
     else:
         maternity_leave_weeks = _weeks_for_children_count(
@@ -1041,7 +1163,7 @@ def evaluate_supplementary_maternity_leave_eligibility(
             )
 
     _apply_self_employed_debt_check(
-        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions, missing_fields
     )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -1062,6 +1184,7 @@ def evaluate_supplementary_maternity_leave_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -1080,13 +1203,17 @@ def evaluate_adoption_leave_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     if request.is_adoption_or_foster_care is None:
-        missing_data.append(
+        _missing(
+            missing_data,
+            missing_fields,
+            "is_adoption_or_foster_care",
             "czy wniosek dotyczy przyjęcia dziecka na wychowanie (przysposobienie lub "
-            "rodzina zastępcza)"
+            "rodzina zastępcza)",
         )
     elif not request.is_adoption_or_foster_care:
         unmet_conditions.append(
@@ -1111,7 +1238,12 @@ def evaluate_adoption_leave_eligibility(
 
         age_limit: int | None = None
         if request.foster_care_type is None:
-            missing_data.append("forma przyjęcia dziecka (przysposobienie/rodzina zastępcza)")
+            _missing(
+                missing_data,
+                missing_fields,
+                "foster_care_type",
+                "forma przyjęcia dziecka (przysposobienie/rodzina zastępcza)",
+            )
         elif request.foster_care_type == FosterCareType.rodzina_zastepcza_zawodowa:
             unmet_conditions.append(
                 "rodzina zastępcza zawodowa nie uprawnia do tego urlopu (Kodeks pracy "
@@ -1134,9 +1266,12 @@ def evaluate_adoption_leave_eligibility(
             )
         else:
             if request.school_obligation_deferred is None:
-                missing_data.append(
+                _missing(
+                    missing_data,
+                    missing_fields,
+                    "school_obligation_deferred",
                     "czy wobec dziecka odroczono obowiązek szkolny (wpływa na limit "
-                    "wieku: 7 albo 10 lat)"
+                    "wieku: 7 albo 10 lat)",
                 )
             else:
                 age_limit = (
@@ -1150,7 +1285,9 @@ def evaluate_adoption_leave_eligibility(
                 )
 
         if request.child_age_years is None:
-            missing_data.append("wiek dziecka w pełnych latach")
+            _missing(
+                missing_data, missing_fields, "child_age_years", "wiek dziecka w pełnych latach"
+            )
         elif age_limit is not None:
             if request.child_age_years >= age_limit:
                 unmet_conditions.append(
@@ -1174,7 +1311,7 @@ def evaluate_adoption_leave_eligibility(
                 )
 
     _apply_self_employed_debt_check(
-        request, rule, met_conditions, unmet_conditions, missing_data, solutions
+        request, rule, met_conditions, unmet_conditions, missing_data, solutions, missing_fields
     )
 
     status = _decide_status(missing_data, unmet_conditions, solutions)
@@ -1198,6 +1335,7 @@ def evaluate_adoption_leave_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,
@@ -1235,11 +1373,17 @@ def evaluate_stillbirth_funeral_benefit_eligibility(
     met_conditions: list[str] = []
     unmet_conditions: list[str] = []
     missing_data: list[str] = []
+    missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
     if request.is_stillbirth_or_infant_death is None:
-        missing_data.append("czy doszło do martwego urodzenia dziecka")
+        _missing(
+            missing_data,
+            missing_fields,
+            "is_stillbirth_or_infant_death",
+            "czy doszło do martwego urodzenia dziecka",
+        )
     elif request.is_stillbirth_or_infant_death:
         met_conditions.append(
             "martwe urodzenie dziecka (Poradnik ZUS 2026, zasiłek pogrzebowy formularz Z-12)"
@@ -1264,7 +1408,12 @@ def evaluate_stillbirth_funeral_benefit_eligibility(
         )
 
     if request.days_since_burial is None:
-        missing_data.append("liczba dni, które upłynęły od dnia pochówku")
+        _missing(
+            missing_data,
+            missing_fields,
+            "days_since_burial",
+            "liczba dni, które upłynęły od dnia pochówku",
+        )
     elif request.days_since_burial > _STILLBIRTH_FUNERAL_DEADLINE_DAYS:
         unmet_conditions.append(
             f"minęło więcej niż {_STILLBIRTH_FUNERAL_DEADLINE_DAYS} dni (12 miesięcy) od "
@@ -1298,6 +1447,7 @@ def evaluate_stillbirth_funeral_benefit_eligibility(
         met_conditions=met_conditions,
         unmet_conditions=unmet_conditions,
         missing_data=missing_data,
+        missing_fields=missing_fields,
         possible_solutions=solutions,
         plan=plan,
         rules_version=rule.version,

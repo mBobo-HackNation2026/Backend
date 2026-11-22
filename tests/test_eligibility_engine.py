@@ -16,6 +16,7 @@ from app.eligibility.engine import (
     evaluate_supplementary_maternity_leave_eligibility,
 )
 from app.eligibility.schemas import (
+    EligibilityResult,
     EligibilityStatus,
     EmploymentEndedReason,
     FosterCareType,
@@ -1382,3 +1383,76 @@ def test_stillbirth_funeral_benefit_requires_verification_when_fields_missing() 
 
     assert result.status == EligibilityStatus.requires_verification
     assert len(result.missing_data) == 2
+
+
+# --- missing_fields (stable field identifiers alongside missing_data free text) ---
+
+
+def _assert_missing_fields_consistent(result: EligibilityResult) -> None:
+    """Every missing_fields entry must name a real request field and carry a message
+    that also appears in missing_data; every missing_data message must have at least
+    one matching missing_fields entry (see EligibilityResult.missing_fields docstring
+    for why this is "at least one", not a strict 1:1 pairing - a single message can
+    legitimately depend on more than one field)."""
+    valid_field_names = set(MaternityLeaveEligibilityRequest.model_fields)
+    for info in result.missing_fields:
+        assert info.field in valid_field_names, f"unknown field name: '{info.field}'"
+        assert info.message in result.missing_data
+
+    for message in result.missing_data:
+        assert any(info.message == message for info in result.missing_fields), (
+            f"missing_data message has no matching missing_fields entry: {message!r}"
+        )
+
+
+def test_missing_fields_consistent_for_every_benefit_with_empty_request() -> None:
+    cases = [
+        (evaluate_maternity_leave_eligibility, _make_rule()),
+        (evaluate_alternative_maternity_benefit_eligibility, _make_alternative_rule()),
+        (evaluate_paternity_leave_eligibility, _make_paternity_rule()),
+        (evaluate_parental_leave_eligibility, _make_parental_leave_rule()),
+        (
+            evaluate_sickness_benefit_during_pregnancy_eligibility,
+            _make_sickness_during_pregnancy_rule(),
+        ),
+        (evaluate_rehabilitation_benefit_eligibility, _make_rehabilitation_rule()),
+        (evaluate_supplementary_maternity_leave_eligibility, _make_supplementary_leave_rule()),
+        (evaluate_adoption_leave_eligibility, _make_adoption_leave_rule()),
+        (evaluate_stillbirth_funeral_benefit_eligibility, _make_stillbirth_funeral_rule()),
+    ]
+    request = MaternityLeaveEligibilityRequest(children_count=1)
+
+    for evaluate, rule in cases:
+        result = evaluate(request, rule)
+        assert result.missing_data, f"{evaluate.__name__} should report missing data here"
+        _assert_missing_fields_consistent(result)
+
+
+def test_missing_fields_exact_shape_for_single_field_message() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1)
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.missing_data == ["status ubezpieczenia chorobowego w dniu porodu"]
+    assert len(result.missing_fields) == 1
+    assert result.missing_fields[0].field == "insured_at_birth"
+    assert result.missing_fields[0].message == result.missing_data[0]
+
+
+def test_missing_fields_tags_both_fields_for_a_shared_message() -> None:
+    """child_hospitalization_weeks is reported so only the combined gestational-week/
+    birth-weight message remains - it depends on two fields, so it must appear twice
+    in missing_fields (once per field), both times with the same message text."""
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, child_hospitalization_weeks=3)
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    matches = [
+        info
+        for info in result.missing_fields
+        if info.field in {"gestational_week_at_birth", "birth_weight_grams"}
+    ]
+    assert {info.field for info in matches} == {"gestational_week_at_birth", "birth_weight_grams"}
+    assert len({info.message for info in matches}) == 1

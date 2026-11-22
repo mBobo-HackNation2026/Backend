@@ -35,6 +35,18 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
 - **Silnik uprawnień**: wspólny, generyczny endpoint
   `POST /api/v1/eligibility/check/{benefit_code}` z rejestrem świadczeń
   (`app/eligibility/registry.py`).
+- **`missing_fields` (nowość)** — `EligibilityResult.missing_data` to zawsze był
+  tylko wolny tekst do wyświetlenia, nie identyfikatory pól - FE słusznie
+  zgłosił, że nie da się tego bezpiecznie sparsować do zbudowania formularza
+  "uzupełnij brakujące dane". Dodatkowe, addytywne pole
+  `missing_fields: [{field, message}]` daje stabilną nazwę pola z
+  `MaternityLeaveEligibilityRequest` sparowaną z tą samą treścią komunikatu co
+  w `missing_data` (może mieć więcej wpisów niż `missing_data`, gdy jeden
+  komunikat zależy od więcej niż jednego pola - wtedy ta sama `message`
+  powtarza się, raz na pole). Wprowadzone przez wspólny helper `_missing()`/
+  `_missing_many()` w `app/eligibility/engine.py`, używany we wszystkich 9
+  evaluatorach zamiast surowego `missing_data.append(...)` - gwarantuje, że oba
+  pola nigdy się nie rozjadą. `missing_data` bez zmian (kompatybilność wsteczna).
 - **Rozbudowany schemat requestu** (`MaternityLeaveEligibilityRequest` w
   `app/eligibility/schemas.py`) — wspólny dla wszystkich świadczeń, ~30 pól z
   cytatem podstawy prawnej przy każdym: okresy wyczekiwania, hospitalizacja

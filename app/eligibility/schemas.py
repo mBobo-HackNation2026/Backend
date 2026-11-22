@@ -456,6 +456,18 @@ class BenefitPlan(BaseModel):
     legal_basis: list[str] = Field(description="Podstawy prawne uzasadniające plan.")
 
 
+class MissingFieldInfo(BaseModel):
+    """Stabilny identyfikator brakującego pola żądania, sparowany z tekstem komunikatu
+    (patrz ``EligibilityResult.missing_fields``). ``field`` jest zawsze dokładną nazwą
+    pola z ``MaternityLeaveEligibilityRequest`` - FE może je bezpiecznie zmapować na
+    kontrolkę formularza bez heurystycznego parsowania polskiego tekstu."""
+
+    field: str = Field(description="Nazwa pola w MaternityLeaveEligibilityRequest.")
+    message: str = Field(
+        description="Ten sam tekst co odpowiadający wpis w missing_data (ta sama kolejność)."
+    )
+
+
 class EligibilityResult(BaseModel):
     benefit_code: str = Field(description="Kod świadczenia zgodny z definicją w regułach.")
     benefit_name: str = Field(description="Nazwa świadczenia do wyświetlenia użytkownikowi.")
@@ -473,6 +485,17 @@ class EligibilityResult(BaseModel):
     unmet_conditions: list[str] = Field(description="Warunki potwierdzone jako niespełnione.")
     missing_data: list[str] = Field(
         description="Dane potrzebne do pełnej oceny, których nie podano."
+    )
+    missing_fields: list[MissingFieldInfo] = Field(
+        default_factory=list,
+        description=(
+            "Stabilne identyfikatory pól żądania, każdy sparowany z dokładną treścią "
+            "komunikatu, który też występuje w missing_data - do bezpiecznego budowania "
+            "formularza uzupełniania danych bez parsowania tekstu. Może mieć więcej "
+            "wpisów niż missing_data, gdy jeden komunikat dotyczy więcej niż jednego "
+            "pola (ta sama message wtedy powtarza się, raz na pole). missing_data "
+            "zostaje bez zmian dla kompatybilności wstecznej; to pole jest dodatkiem."
+        ),
     )
     possible_solutions: list[PossibleSolution] = Field(
         description=(
