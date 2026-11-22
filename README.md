@@ -10,7 +10,9 @@ zgadywania przez AI.
 - Python 3.12+
 - FastAPI + Pydantic v2
 - SQLAlchemy (SQLite lokalnie, migracja na PostgreSQL przez zmianę `DATABASE_URL`)
+- Alembic (migracje schematu — jedyny sposób zmiany bazy, zob. "Migracje bazy" niżej)
 - PyMuPDF (analiza dokumentów PDF)
+- httpx (klient OpenRouter w `app/ai_provider/`)
 - pytest
 - uv (zarządzanie zależnościami)
 - Ruff (lint/format)
