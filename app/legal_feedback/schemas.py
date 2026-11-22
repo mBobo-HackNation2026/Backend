@@ -2,7 +2,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models.legal_feedback import LegalFeedbackStatus, LegalFeedbackType
+from app.db.models.legal_feedback import (
+    LegalFeedbackAnalysisClassification,
+    LegalFeedbackStatus,
+    LegalFeedbackType,
+)
 from app.eligibility.schemas import EligibilityStatus
 
 _MAX_COMMENT_LENGTH = 2000
@@ -48,3 +52,17 @@ class LegalFeedbackResponse(BaseModel):
         description="Wersja reguł zastosowana przy ORYGINALNEJ ocenie, nie przy zgłoszeniu."
     )
     created_at: datetime
+
+
+class AIFeedbackAnalysisRaw(BaseModel):
+    """Oczekiwany kształt odpowiedzi modelu AI dla analizy zgłoszenia - pierwsza linia
+    walidacji (brief Etap 2 Faza B: "Zweryfikuj strukturę odpowiedzi"). Celowo nie ma
+    tu pola na zmianę statusu/reguł/kwoty - administrator decyduje o tym osobno, przez
+    PATCH .../status, nigdy automatycznie na podstawie tej analizy."""
+
+    classification: LegalFeedbackAnalysisClassification
+    summary: str
+    potential_issue: str
+    required_information: list[str] = Field(default_factory=list)
+    cited_fragment_ids: list[str] = Field(default_factory=list)
+    recommended_admin_action: str

@@ -8,6 +8,10 @@ from app.admin.schemas import (
     AdminInfo,
     AdminLoginRequest,
     AdminTokenResponse,
+    LegalFeedbackAdminDetail,
+    LegalFeedbackAdminSummary,
+    LegalFeedbackAnalysisResponse,
+    LegalFeedbackStatusUpdateRequest,
     RequestLogEntryDetail,
     RequestLogEntrySummary,
 )
@@ -15,6 +19,12 @@ from app.admin.security import create_admin_access_token, get_current_admin
 from app.core.config import Settings, get_settings
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
+from app.legal_feedback.admin_service import (
+    get_feedback_detail,
+    list_feedback,
+    run_analysis,
+    update_status,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -85,3 +95,92 @@ async def get_request_log_detail(
     if entry is None:
         raise NotFoundError(f"Nie znaleziono wpisu o id={entry_id}")
     return entry
+
+
+def _build_admin_detail(
+    feedback, original_entry, analyses, status_history
+) -> LegalFeedbackAdminDetail:
+    return LegalFeedbackAdminDetail(
+        id=feedback.id,
+        request_log_entry_id=feedback.request_log_entry_id,
+        user_id=feedback.user_id,
+        benefit_code=feedback.benefit_code,
+        feedback_type=feedback.feedback_type,
+        status=feedback.status,
+        rules_version=feedback.rules_version,
+        created_at=feedback.created_at,
+        user_comment=feedback.user_comment,
+        expected_result=feedback.expected_result,
+        original_evaluation=original_entry,
+        analyses=analyses,
+        status_history=status_history,
+    )
+
+
+@router.get(
+    "/legal-feedback",
+    response_model=list[LegalFeedbackAdminSummary],
+    summary="Lista zgłoszeń wątpliwości co do oceny uprawnień (eBobo Legal Intelligence, Etap 2)",
+)
+async def list_legal_feedback(
+    benefit_code: str | None = None,
+    feedback_type: str | None = None,
+    status_filter: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    order: str = "desc",
+    current_admin: str = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> list[LegalFeedbackAdminSummary]:
+    return list_feedback(
+        db,
+        benefit_code=benefit_code,
+        feedback_type=feedback_type,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+        order=order,
+    )
+
+
+@router.get(
+    "/legal-feedback/{feedback_id}",
+    response_model=LegalFeedbackAdminDetail,
+    summary="Szczegóły zgłoszenia: oryginalna ocena, historia analiz AI i historia statusów",
+)
+async def get_legal_feedback_detail(
+    feedback_id: int,
+    current_admin: str = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> LegalFeedbackAdminDetail:
+    feedback, original_entry, analyses, status_history = get_feedback_detail(db, feedback_id)
+    return _build_admin_detail(feedback, original_entry, analyses, status_history)
+
+
+@router.post(
+    "/legal-feedback/{feedback_id}/analyze",
+    response_model=LegalFeedbackAnalysisResponse,
+    summary="Uruchom analizę prawną zgłoszenia przez OpenRouter (hipoteza, nie potwierdzony błąd)",
+)
+async def analyze_legal_feedback(
+    feedback_id: int,
+    current_admin: str = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> LegalFeedbackAnalysisResponse:
+    return run_analysis(db, feedback_id)
+
+
+@router.patch(
+    "/legal-feedback/{feedback_id}/status",
+    response_model=LegalFeedbackAdminDetail,
+    summary="Zmień status zgłoszenia (decyzja administratora, zapisywana w historii)",
+)
+async def update_legal_feedback_status(
+    feedback_id: int,
+    payload: LegalFeedbackStatusUpdateRequest,
+    current_admin: str = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> LegalFeedbackAdminDetail:
+    update_status(db, feedback_id, payload.status, payload.reason, current_admin)
+    feedback, original_entry, analyses, status_history = get_feedback_detail(db, feedback_id)
+    return _build_admin_detail(feedback, original_entry, analyses, status_history)

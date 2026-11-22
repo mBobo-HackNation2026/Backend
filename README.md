@@ -385,6 +385,41 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     `request_payload`/`response_payload` - te już żyją w powiązanym wpisie
     `request_log`, dostępnym przez FK.
   - Zob. pamięć projektu `project-ebobo-legal-feedback`.
+- **eBobo Legal Intelligence — Etap 2, Faza B (nowość)**: przegląd zgłoszeń przez
+  administratora i analiza prawna przez OpenRouter (reużywa `app/ai_provider` i
+  `app/legal_knowledge` — żadnej drugiej integracji LLM).
+  - `GET /api/v1/admin/legal-feedback` — lista z filtrowaniem
+    (`benefit_code`/`feedback_type`/`status_filter`), paginacją (`limit`/`offset`)
+    i sortowaniem (`order=asc|desc` po dacie).
+  - `GET /api/v1/admin/legal-feedback/{id}` — szczegóły: zgłoszenie + oryginalna,
+    niezmieniona ocena silnika (`original_evaluation`) + pełna historia analiz AI
+    + pełna historia zmian statusu.
+  - `POST /api/v1/admin/legal-feedback/{id}/analyze` — uruchamia analizę AI.
+    Dobiera fragmenty z `app/legal_knowledge` dla `benefit_code` zgłoszenia,
+    wysyła zminimalizowany kontekst (typ zgłoszenia, treść komentarza
+    **jawnie oznaczona jako niezaufane dane, nie instrukcja**, bezpieczny wyciąg
+    z oryginalnej oceny - status/warunki/ostrzeżenia, nigdy surowy request
+    użytkownika). Każde uruchomienie to **nowy, niezmienny rekord**
+    (`LegalFeedbackAnalysis`) - można uruchomić wielokrotnie, cała historia
+    zostaje widoczna. **Samo powstanie analizy nigdy nie zmienia statusu
+    zgłoszenia** - to wyłącznie hipoteza do weryfikacji.
+  - Cytaty AI (`cited_fragment_ids`) są weryfikowane dokładnie jak w Funkcji 1 -
+    niezweryfikowane są odrzucane (`verified_source_ids` je pomija).
+    `requires_human_review` jest zawsze `true`, wymuszane przez backend
+    niezależnie od tego, co zwróci model.
+  - **Awaria OpenRouter/zła odpowiedź nigdy nie generuje fikcyjnego raportu ani
+    nie usuwa zgłoszenia** - zapisywany jest rekord `analysis_status="failed"` z
+    bezpiecznym komunikatem diagnostycznym (`classification`/`summary`/... zostają
+    puste), zgłoszenie można przeanalizować ponownie w dowolnym momencie.
+  - `PATCH /api/v1/admin/legal-feedback/{id}/status` — **wyłącznie** administrator
+    zmienia status (`new`/`under_review`/`confirmed_issue`/`not_an_issue`/
+    `needs_more_information`/`closed`), z opcjonalnym uzasadnieniem. Każda zmiana
+    zostawia wpis w `LegalFeedbackStatusHistory` (kto/kiedy/stary→nowy
+    status/uzasadnienie) - w pełni audytowalne. Nie wymaga wcześniejszej analizy
+    AI - decyzja administratora wystarczy sama w sobie.
+  - Dwie nowe tabele (`legal_feedback_analyses`, `legal_feedback_status_history`)
+    doszły przez kolejną migrację Alembic, bez żadnej ręcznej ingerencji w bazę.
+  - Zob. pamięć projektu `project-ebobo-legal-feedback-admin-review`.
 
 ### W trakcie / tymczasowe
 
@@ -437,8 +472,9 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ✅ zrobione - patrz "Zrobione" wyżej; lista organizacji charytatywnych celowo pusta (wymaga zweryfikowanych danych) |
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
 | 8 | eBobo Legal Intelligence — Funkcja 1: wyjaśnianie wyniku oceny przez AI (OpenRouter), ugruntowane w lokalnej bazie wiedzy prawnej (minimalny RAG) | ✅ zrobione - patrz "Zrobione" wyżej; Funkcje 2-4 (odwołania od ZUS, feedback, zatwierdzanie zmian reguł) odłożone |
-| 9 | eBobo Legal Intelligence — Etap 2, Faza A: zgłaszanie wątpliwości co do oceny (`POST /legal-feedback`) | ✅ zrobione - patrz "Zrobione" wyżej; Faza B (analiza AI zgłoszenia + panel administratora) osobne zadanie |
+| 9 | eBobo Legal Intelligence — Etap 2, Faza A: zgłaszanie wątpliwości co do oceny (`POST /legal-feedback`) | ✅ zrobione - patrz "Zrobione" wyżej |
 | 10 | Migracje bazy (Alembic) — wymaganie P0 z briefu Etap 2 Fazy B, zabezpieczenie przed `rm -f app.db` jako "metodą" zmiany schematu | ✅ zrobione - patrz "Migracje bazy (Alembic)" niżej |
+| 11 | eBobo Legal Intelligence — Etap 2, Faza B: panel admina do przeglądu zgłoszeń + analiza AI przez OpenRouter | ✅ zrobione - patrz "Zrobione" wyżej; odwołania od ZUS i automatyczne poprawianie reguł (Funkcje 2-4 pierwotnego briefu) nadal odłożone |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
@@ -500,7 +536,7 @@ app/
   services/         # (zarezerwowane, obecnie puste - logika biznesowa żyje w modułach wyżej)
   main.py           # fabryka aplikacji FastAPI (create_app), montuje /admin jako static files
 static/admin/       # statyczny frontend panelu administracyjnego (vanilla HTML/JS, bez build stepu)
-tests/              # 231 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
+tests/              # 248 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
 alembic/            # migracje schematu (alembic/versions/) - jedyny sposób zmiany schematu bazy
 ```
 
@@ -702,6 +738,15 @@ zadanie (Faza B).
 `GET /admin/request-log?benefit_code=...&limit=...`,
 `GET /admin/request-log/{id}` - wszystkie wymagają
 `Authorization: Bearer <admin_token>`.
+
+**Legal Feedback (Etap 2, Faza B)** - wszystkie też wymagają admin tokenu:
+
+| Endpoint | Opis |
+|---|---|
+| `GET /admin/legal-feedback?benefit_code=...&feedback_type=...&status_filter=...&limit=...&offset=...&order=asc\|desc` | Lista zgłoszeń. |
+| `GET /admin/legal-feedback/{id}` | Zgłoszenie + `original_evaluation` (niezmieniony wpis `request_log`) + `analyses[]` (historia, najnowsze pierwsze) + `status_history[]` (historia, najnowsze pierwsze). |
+| `POST /admin/legal-feedback/{id}/analyze` | Uruchamia analizę AI (OpenRouter), zwraca nowy, niezmienny rekord analizy. `analysis_status: "completed"\|"failed"`. Nigdy nie zmienia `status` zgłoszenia. |
+| `PATCH /admin/legal-feedback/{id}/status` | Body: `{status, reason?}`. Zmienia status, zapisuje wpis w historii (`changed_by`, `reason`, `changed_at`). |
 
 ### Health
 
