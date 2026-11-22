@@ -278,16 +278,34 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     silnik** (nigdy nie ufa wynikowi zadeklarowanemu przez frontend).
   - AI dostaje wyłącznie zminimalizowane dane: opisy warunków już
     wygenerowane przez silnik (`met_conditions`/`unmet_conditions`/
-    `missing_data`/`warnings`) i listę dozwolonych cytatów prawnych z reguły
-    (`legal_basis`) — nigdy surowego payloadu użytkownika (dochody, dane
-    zdrowotne dziecka itd.).
+    `missing_data`/`warnings`) i **faktyczną treść** (nie tylko etykiety)
+    fragmentów prawnych z nowej, niewielkiej lokalnej bazy wiedzy
+    (`app/legal_knowledge/`) — nigdy surowego payloadu użytkownika (dochody,
+    dane zdrowotne dziecka itd.).
   - **Status/kwota zawsze z silnika, nigdy z AI** — schemat odpowiedzi AI
     (`AIExplanationRaw`) nie ma nawet pola na status/kwotę.
-  - **Każdy cytat prawny zwrócony przez AI jest sprawdzany** względem zbioru
-    przepisów faktycznie zapisanych w `BenefitRuleVersion.legal_basis` —
-    niezweryfikowane cytaty są cicho odrzucane i wymuszają
-    `requires_additional_verification=true`, nigdy nie trafiają do
-    użytkownika jako potwierdzone.
+  - **"Minimalny RAG" bez bazy wektorowej** (`app/legal_knowledge/`) — 23
+    ręcznie skurowane fragmenty (ustawa zasiłkowa, Kodeks pracy, Poradnik ZUS
+    2026), każdy z `id`/`source`/`citation`/`content`/`effective_from`/
+    `related_benefit_codes`. Treść fragmentów nie jest wymyślona od nowa —
+    jest rozbita z cytatów już zweryfikowanych i używanych w
+    `BenefitRuleVersion.legal_basis` (w tym poprawionych przy okazji napraw
+    Etap 4). Wybór fragmentów = proste filtrowanie po `benefit_code` i dacie
+    obowiązywania (`get_fragments_for_benefit`), bez wyszukiwania
+    semantycznego — niepotrzebne przy tak małym, statycznym zbiorze.
+  - **Każdy cytat prawny i każda rekomendacja AI są sprawdzane** względem
+    zbioru fragmentów faktycznie przekazanych modelowi dla danego
+    świadczenia — samo istnienie cytowanego id to za mało: rekomendacja
+    (`suggested_next_steps`) powołująca się na fragment spoza tego zbioru
+    jest odrzucana **w całości** (nie pokazywana jako niepewna — po prostu
+    nie pokazywana), a niezweryfikowane cytaty (`verified_legal_basis`) są
+    cicho pomijane. Każde odrzucenie wymusza
+    `requires_additional_verification=true` i dokłada deterministyczny krok
+    "skontaktuj się z ZUS lub doradcą/prawnikiem".
+  - **Brak fragmentów wiedzy prawnej dla danego świadczenia** (luka w bazie,
+    nie awaria AI) jest obsłużony wprost — backend nie woła wtedy modelu "na
+    pusto", tylko zwraca deterministyczny wynik z jawnym zaznaczeniem
+    wymaganej weryfikacji.
   - **Niedostępność OpenRouter (brak klucza, timeout, błąd HTTP, nieprawidłowy
     JSON) nigdy nie zwraca HTTP 500** — zwracany jest deterministyczny
     fallback (`ai_available=false`, `source="fallback"`) zbudowany wyłącznie
@@ -353,7 +371,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |
 | 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ✅ zrobione - patrz "Zrobione" wyżej; lista organizacji charytatywnych celowo pusta (wymaga zweryfikowanych danych) |
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
-| 8 | eBobo Legal Intelligence — Funkcja 1: wyjaśnianie wyniku oceny przez AI (OpenRouter) | ✅ zrobione - patrz "Zrobione" wyżej; Funkcje 2-4 (odwołania od ZUS, feedback, zatwierdzanie zmian reguł) odłożone |
+| 8 | eBobo Legal Intelligence — Funkcja 1: wyjaśnianie wyniku oceny przez AI (OpenRouter), ugruntowane w lokalnej bazie wiedzy prawnej (minimalny RAG) | ✅ zrobione - patrz "Zrobione" wyżej; Funkcje 2-4 (odwołania od ZUS, feedback, zatwierdzanie zmian reguł) odłożone |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik

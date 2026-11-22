@@ -5,6 +5,17 @@ from pydantic import BaseModel, Field
 from app.eligibility.schemas import EligibilityStatus
 
 
+class GroundedRecommendation(BaseModel):
+    """Jedna propozycja dalszego postępowania wraz z fragmentami wiedzy prawnej, na
+    których AI ją oparło. Pusta lista ``supporting_fragment_ids`` jest dopuszczalna
+    (ogólna/proceduralna wskazówka, np. "przygotuj dokumenty", nie niesie własnej
+    tezy prawnej do zweryfikowania) - ale lista NIEPRAWIDŁOWYCH id (spoza
+    dostarczonego zbioru fragmentów) powoduje odrzucenie całej rekomendacji."""
+
+    text: str
+    supporting_fragment_ids: list[str] = Field(default_factory=list)
+
+
 class AIExplanationRaw(BaseModel):
     """Oczekiwany kształt odpowiedzi modelu AI - pierwsza linia walidacji (brief pkt 6:
     "Odpowiedź AI musi przechodzić walidację schematu Pydantic"). Celowo nie ma tu pól
@@ -14,9 +25,9 @@ class AIExplanationRaw(BaseModel):
 
     explanation: str
     missing_data_explained: list[str] = Field(default_factory=list)
-    suggested_next_steps: list[str] = Field(default_factory=list)
+    suggested_next_steps: list[GroundedRecommendation] = Field(default_factory=list)
     other_benefits_to_check: list[str] = Field(default_factory=list)
-    cited_legal_basis: list[str] = Field(default_factory=list)
+    cited_fragment_ids: list[str] = Field(default_factory=list)
     requires_additional_verification: bool = False
 
 
@@ -30,7 +41,14 @@ class LegalAdvisorExplainResponse(BaseModel):
         default_factory=list, description="Brakujące dane/dokumenty, wyjaśnione w prostym języku."
     )
     suggested_next_steps: list[str] = Field(
-        default_factory=list, description="Zgodne z prawem propozycje dalszego postępowania."
+        default_factory=list,
+        description=(
+            "Zgodne z prawem propozycje dalszego postępowania. Każda pozycja albo nie "
+            "niesie własnej tezy prawnej (ogólna wskazówka proceduralna), albo jest "
+            "oparta na co najmniej jednym fragmencie z lokalnej bazy wiedzy prawnej - "
+            "rekomendacje AI powołujące się na nieistniejący fragment są odrzucane w "
+            "całości, nigdy nie są pokazywane jako potwierdzone."
+        ),
     )
     other_benefits_to_check: list[str] = Field(
         default_factory=list,
@@ -39,15 +57,18 @@ class LegalAdvisorExplainResponse(BaseModel):
     verified_legal_basis: list[str] = Field(
         default_factory=list,
         description=(
-            "Przepisy przytoczone przez AI, które udało się zweryfikować względem reguł "
-            "zapisanych w systemie (rule.legal_basis). Niezweryfikowane cytaty są odrzucane - "
+            "Fragmenty wiedzy prawnej (z ``app/legal_knowledge``, zawierające faktyczną "
+            "treść przepisu, nie tylko etykietę), na których AI oparło wyjaśnienie - "
+            "przytoczone wyłącznie, jeśli backend zweryfikował, że fragment faktycznie "
+            "istnieje i dotyczy tego świadczenia. Niezweryfikowane cytaty są odrzucane - "
             "nigdy nie są pokazywane użytkownikowi jako potwierdzone."
         ),
     )
     requires_additional_verification: bool = Field(
         description=(
-            "True, gdy AI samo to zgłosiło albo gdy backend odrzucił choć jeden "
-            "niezweryfikowany cytat prawny z odpowiedzi AI."
+            "True, gdy AI samo to zgłosiło, gdy backend odrzucił choć jeden "
+            "niezweryfikowany cytat prawny lub rekomendację z odpowiedzi AI, albo gdy w "
+            "lokalnej bazie wiedzy brak fragmentów dla tego świadczenia."
         )
     )
     rules_version: int = Field(description="Wersja reguł, na podstawie której wykonano ocenę.")
