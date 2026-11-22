@@ -208,6 +208,25 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     bez tabeli w bazie - to dane demonstracyjne, nie parametry prawne
     wymagające wersjonowania jak `BenefitRuleVersion`.
   - Zob. pamięć projektu `project-ebobo-mock-zus-provider`.
+- **Przewodnik po formalnościach** (`app/formalities/`) — **nowość**, ostatni
+  punkt BE z priorytetów P0 recenzji FE. Treść oparta wprost na tekście
+  oficjalnego briefu (`resorces/Projekt.pdf`), nie wymyślona.
+  - `GET /api/v1/formalities/general` — ogólne ryzyka utraty uprawnień albo
+    obniżenia świadczenia (Projekt.pdf §H: umowa/działalność "dla pozoru",
+    sztuczne podwyższenie podstawy w ciąży, niepodleganie ubezpieczeniu na
+    dzień porodu), ochrona przed zwolnieniem w okresie ciąży/urlopów
+    rodzicielskich (§I), oraz świadoma luka: brief wymaga wskazania
+    organizacji charytatywnych wspierających w trudnych sytuacjach (śmierć
+    dziecka, przedwczesny poród, poronienie, ciężka choroba dziecka) - sekcja
+    jest celowo pusta z jawną notatką, bo projekt nie ma zweryfikowanej listy
+    takich organizacji; wymyślanie nazw byłoby gorsze niż przyznanie się do
+    braku.
+  - `GET /api/v1/formalities/{benefit_code}` — dla konkretnego świadczenia:
+    instytucja/dokumenty/terminy/podstawa prawna (z tej samej reguły co
+    silnik uprawnień i kalkulator, nie duplikowane), plus te same ogólne
+    ryzyka i wygenerowane `next_steps` (sprawdź uprawnienia → oblicz kwotę →
+    przygotuj dokumenty → złóż wniosek → sprawdź powiązane świadczenia).
+  - Zob. pamięć projektu `project-ebobo-formalities-guide`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
 
@@ -259,7 +278,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 3 | Zintegrowany kalkulator świadczeń (kwoty, okresy, warianty obojga rodziców, łączenie pracy z urlopem, adopcja, sytuacje szczególne) | ✅ zrobione - kwoty per świadczenie + porównanie wariantów urlopu rodzicielskiego, patrz "Zrobione" wyżej; pola podstawy wymiaru dla zatrudnienia <12 mies./premii/przerwy między zasiłkami jeszcze nieobsłużone |
 | 4 | `MockZUSProvider` — symulowane ubezpieczenie/okresy/e-ZLA/zadłużenie/historia świadczeń | ✅ zrobione - 5 profili + endpoint porównania rozbieżności, patrz "Zrobione" wyżej |
 | 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |
-| 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ⬜ nierozpoczęte |
+| 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ✅ zrobione - patrz "Zrobione" wyżej; lista organizacji charytatywnych celowo pusta (wymaga zweryfikowanych danych) |
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
