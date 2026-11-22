@@ -150,25 +150,24 @@ async function authedFetch(path, options = {}) {
   return response;
 }
 
+const MODULE_HANDLERS = {
+  submissions: showRequestsView,
+  legal_feedback: showLegalFeedbackView,
+  engine_quality: showEngineQualityView,
+};
+
 function renderModules(modules) {
   modulesContainer.innerHTML = "";
   for (const module of modules) {
-    const card = document.createElement("div");
-    card.className = "module-card";
-    card.innerHTML = `
-      <h2>${module.label}</h2>
-      <span class="status-badge">${module.status}</span>
-    `;
-    if (module.key === "submissions" && module.status === "available") {
-      card.classList.add("module-card--clickable");
-      card.addEventListener("click", showRequestsView);
-    } else if (module.key === "legal_feedback" && module.status === "available") {
-      card.classList.add("module-card--clickable");
-      card.addEventListener("click", showLegalFeedbackView);
-    } else if (module.key === "engine_quality" && module.status === "available") {
-      card.classList.add("module-card--clickable");
-      card.addEventListener("click", showEngineQualityView);
+    const handler = MODULE_HANDLERS[module.key];
+    if (module.status !== "available" || !handler) {
+      // Nothing happens on click yet (feature not built) - don't show a dead card.
+      continue;
     }
+    const card = document.createElement("div");
+    card.className = "module-card module-card--clickable";
+    card.innerHTML = `<h2>${module.label}</h2>`;
+    card.addEventListener("click", handler);
     modulesContainer.appendChild(card);
   }
 }
