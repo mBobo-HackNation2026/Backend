@@ -170,13 +170,33 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     tygodni (matka maksymalnie, ojciec maksymalnie, po równo) z kwotą dla
     każdego rodzica i sumą gospodarstwa domowego - widać np. że jeśli jeden
     rodzic zarabia więcej, warianty dają różną łączną kwotę dla rodziny.
-    Upraszcza stawkę 81,5%/70% do jednej wartości na wariant (nie dzieli
-    wewnętrznie nieprzenoszalnych 9 tygodni każdego rodzica na osobną stawkę) -
-    sygnalizuje to przez `warnings`.
+    **Poprawka po recenzji (realny bug, nie tylko cytowanie)**: wcześniej
+    stawka 81,5% była stosowana jednolicie do całego wymiaru każdego
+    wariantu, łącznie z nieprzenoszalnymi 9 tygodniami drugiego rodzica -
+    niezgodnie z ustawą zasiłkową art. 31 ust. 3f, który te 9 tygodni
+    zawsze płaci 70%, niezależnie od wybranego wariantu stawki. Każdy
+    wariant ma teraz osobną stawkę per rodzic
+    (`rate_percentage_parent_a`/`rate_percentage_parent_b`): rodzic
+    zajmujący "dzieloną" pulę (max wariant) dostaje stawkę podwyższoną,
+    jeśli wybrana, drugi rodzic na swoich dokładnie 9 tygodniach zawsze
+    70%. W wariancie równego podziału stosowane jest 70% dla obojga - przy
+    dowolnym podziale żaden rodzic nie składa wniosku o cały przysługujący
+    wymiar w jednym ciągu, więc stawka podwyższona nie ma jednoznacznego
+    zastosowania.
   - **Nieużywane jeszcze pola schematu**: `employment_duration_months`,
     `bonus_type`, `months_since_last_benefit` istnieją w requestcie, ale
     podstawa wymiaru ich jeszcze nie uwzględnia (niuanse art. 37/38/42/43) -
     to realny, niedokończony zakres, nie kosmetyka.
+  - **Poprawka bezpieczeństwa danych wejściowych**: ekstremalnie duże
+    wartości (`average_monthly_income_zl`/`voluntary_contribution_base_zl`/
+    `debt_amount_zl`, np. literówka z kilkudziesięcioma cyframi) docierały
+    do arytmetyki `Decimal` i powodowały nieobsłużony wyjątek
+    `decimal.InvalidOperation` przy `.quantize()` (precyzja kontekstu
+    Decimal to domyślnie 28 cyfr) - skutkowało to `HTTP 500` zamiast
+    czytelnego błędu walidacji. Dodano górny limit (1 mld zł/miesiąc,
+    absurdalnie wysoki względem realnych dochodów) na te pola w schemacie -
+    takie wartości są teraz odrzucane z `HTTP 422` jeszcze przed dotarciem
+    do obliczeń.
   - **Poprawka cytowań**: weryfikacja stawki 81,5%/70% urlopu rodzicielskiego
     przeciwko treści ustawy wykazała błędne cytaty w
     `evaluate_parental_leave_eligibility`/`_ensure_parental_leave_seeded`

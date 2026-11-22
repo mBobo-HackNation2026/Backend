@@ -33,6 +33,49 @@ def test_calculate_unknown_benefit_code_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_calculate_rejects_absurdly_large_income_with_422_not_500(client: TestClient) -> None:
+    """Regression test: an income value with far too many digits used to reach
+    Decimal.quantize() and crash with an uncaught decimal.InvalidOperation (HTTP 500)
+    instead of being rejected as invalid input."""
+    response = client.post(
+        f"/api/v1/benefits/calculate/{MATERNITY_LEAVE_CODE}",
+        json={
+            "children_count": 1,
+            "average_monthly_income_zl": "99999999999999999999999999999999.00",
+            "insurance_title": "umowa_o_prace",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_calculate_rejects_negative_income_with_422(client: TestClient) -> None:
+    response = client.post(
+        f"/api/v1/benefits/calculate/{MATERNITY_LEAVE_CODE}",
+        json={"children_count": 1, "average_monthly_income_zl": "-100.00"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_compare_parental_leave_rejects_absurdly_large_income_with_422_not_500(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/api/v1/benefits/compare/urlop-rodzicielski",
+        json={
+            "children_count": 1,
+            "parent_a": {
+                "label": "A",
+                "average_monthly_income_zl": "99999999999999999999999999999999.00",
+            },
+            "parent_b": {"label": "B"},
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_calculate_stillbirth_funeral_benefit_returns_lump_sum(client: TestClient) -> None:
     response = client.post(
         f"/api/v1/benefits/calculate/{STILLBIRTH_FUNERAL_CODE}",
@@ -77,6 +120,53 @@ def test_compare_parental_leave_variants_household_totals(client: TestClient) ->
     assert Decimal(father_max_variant["total_household_amount_zl"]) > Decimal(
         mother_max_variant["total_household_amount_zl"]
     )
+
+
+def test_compare_parental_leave_full_dose_never_applies_81_5_to_reserved_9_weeks(
+    client: TestClient,
+) -> None:
+    """Regression test for a real bug found by independent QA (Etap 4): the 81,5%
+    full-dose rate was being applied uniformly to BOTH parents' weeks, including the
+    9 weeks that ustawa zasiłkowa art. 31 ust. 3f reserves exclusively for the other
+    parent at a fixed 70% - those 9 weeks must never get 81,5%, regardless of the
+    full_dose election."""
+    response = client.post(
+        "/api/v1/benefits/compare/urlop-rodzicielski",
+        json={
+            "children_count": 1,
+            "za_zyciem_certificate": False,
+            "full_dose_claimed_within_21_days": True,
+            "parent_a": {
+                "label": "Matka",
+                "average_monthly_income_zl": "6000.00",
+                "insurance_title": "umowa_o_prace",
+                "is_full_time_employment": True,
+            },
+            "parent_b": {
+                "label": "Ojciec",
+                "average_monthly_income_zl": "8000.00",
+                "insurance_title": "umowa_o_prace",
+                "is_full_time_employment": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    mother_max = next(v for v in body["variants"] if v["weeks_parent_a"] == 32)
+    assert mother_max["rate_percentage_parent_a"] == "81.50"
+    assert mother_max["rate_percentage_parent_b"] == "70.00"
+    assert mother_max["weeks_parent_b"] == 9
+
+    father_max = next(v for v in body["variants"] if v["weeks_parent_b"] == 32)
+    assert father_max["rate_percentage_parent_b"] == "81.50"
+    assert father_max["rate_percentage_parent_a"] == "70.00"
+    assert father_max["weeks_parent_a"] == 9
+
+    equal_split = next(v for v in body["variants"] if v["weeks_parent_a"] == 20)
+    assert equal_split["rate_percentage_parent_a"] == "70.00"
+    assert equal_split["rate_percentage_parent_b"] == "70.00"
 
 
 def test_compare_parental_leave_variants_missing_income_warns(client: TestClient) -> None:

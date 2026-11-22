@@ -335,13 +335,18 @@ def compare_parental_leave_variants(
         else rule.weeks_by_child_count
     )
     total_pool = _weeks_for_children_count(table, request.children_count)
-    rate = (
+    standard_rate = rule.rate_percentage
+    # Stawka podwyższona dotyczy WYŁĄCZNIE "dzielonej" puli faktycznie zajmowanej przez
+    # rodzica składającego wspólny wniosek o pełny wymiar w ciągu 21 dni (art. 30a,
+    # ustawa zasiłkowa art. 31 ust. 3) - nigdy nieprzenoszalnych 9 tygodni drugiego
+    # rodzica, które są zawsze płatne 70% (art. 31 ust. 3f, Kodeks pracy art. 1821a §4).
+    elected_rate = (
         _PARENTAL_LEAVE_FULL_DOSE_RATE_PERCENT
         if request.full_dose_claimed_within_21_days
-        else rule.rate_percentage
+        else standard_rate
     )
 
-    def amount_for(weeks: int, parent) -> Decimal | None:  # noqa: ANN001
+    def amount_for(weeks: int, parent, rate: Decimal) -> Decimal | None:  # noqa: ANN001
         basis = calculate_basis_of_calculation(
             average_monthly_income_zl=parent.average_monthly_income_zl,
             insurance_title=parent.insurance_title,
@@ -357,30 +362,48 @@ def compare_parental_leave_variants(
     equal_a = total_pool // 2
     equal_b = total_pool - equal_a
 
+    # (etykieta, tygodnie_a, stawka_a, tygodnie_b, stawka_b). W wariantach "max" tylko
+    # rodzic zajmujący dzieloną pulę może dostać stawkę podwyższoną - drugi rodzic
+    # zajmuje dokładnie swoje nieprzenoszalne 9 tygodni, zawsze po 70%. W wariancie
+    # równego podziału żaden rodzic nie składa wniosku o cały przysługujący wymiar w
+    # jednym ciągu, więc stawka podwyższona nie ma jednoznacznego zastosowania - 70%
+    # dla obojga, z ostrzeżeniem.
     variant_specs = [
         (
             f"{request.parent_a.label} wykorzystuje maksymalny możliwy wymiar",
             max_for_a,
+            elected_rate,
             total_pool - max_for_a,
+            standard_rate,
         ),
         (
             f"{request.parent_b.label} wykorzystuje maksymalny możliwy wymiar",
             total_pool - max_for_b,
+            standard_rate,
             max_for_b,
+            elected_rate,
         ),
-        ("Podział po równo między rodzicami", equal_a, equal_b),
+        (
+            "Podział po równo między rodzicami",
+            equal_a,
+            standard_rate,
+            equal_b,
+            standard_rate,
+        ),
     ]
 
     variants: list[ParentalLeaveVariant] = []
-    for label, weeks_a, weeks_b in variant_specs:
-        amount_a = amount_for(weeks_a, request.parent_a)
-        amount_b = amount_for(weeks_b, request.parent_b)
+    for label, weeks_a, rate_a, weeks_b, rate_b in variant_specs:
+        amount_a = amount_for(weeks_a, request.parent_a, rate_a)
+        amount_b = amount_for(weeks_b, request.parent_b, rate_b)
         total = amount_a + amount_b if amount_a is not None and amount_b is not None else None
         variants.append(
             ParentalLeaveVariant(
                 label=label,
                 weeks_parent_a=weeks_a,
                 weeks_parent_b=weeks_b,
+                rate_percentage_parent_a=rate_a,
+                rate_percentage_parent_b=rate_b,
                 amount_parent_a_zl=amount_a,
                 amount_parent_b_zl=amount_b,
                 total_household_amount_zl=total,
@@ -388,6 +411,14 @@ def compare_parental_leave_variants(
         )
 
     warnings: list[str] = []
+    if request.full_dose_claimed_within_21_days:
+        warnings.append(
+            "Stawka 81,5% dotyczy wyłącznie dzielonej puli zajmowanej przez rodzica "
+            "wykorzystującego maksymalny wymiar w wariantach 'max' - nieprzenoszalne 9 "
+            "tygodni drugiego rodzica są zawsze płatne 70% (ustawa zasiłkowa art. 31 "
+            "ust. 3f). W wariancie równego podziału żaden rodzic nie składa wniosku o "
+            "cały przysługujący wymiar w jednym ciągu, więc zastosowano 70% dla obojga."
+        )
     if (
         request.parent_a.average_monthly_income_zl is None
         and request.parent_a.voluntary_contribution_base_zl is None
@@ -404,18 +435,10 @@ def compare_parental_leave_variants(
             f"Brak danych o dochodzie {request.parent_b.label} - kwoty dla tego rodzica "
             "nie zostały wyliczone."
         )
-    if request.full_dose_claimed_within_21_days:
-        warnings.append(
-            "Stawka 81,5% nie obejmuje nieprzenoszalnych 9 tygodni drugiego rodzica, "
-            "które są zawsze płatne 70% (ustawa zasiłkowa art. 31 ust. 3f) - ten "
-            "uproszczony model stosuje jedną stawkę do całego wymiaru każdego wariantu, "
-            "zweryfikuj dokładne rozliczenie z ZUS/pracodawcą."
-        )
-
     return ParentalLeaveCompareResponse(
         total_pool_weeks=total_pool,
         non_transferable_weeks_per_parent=_PARENTAL_LEAVE_NON_TRANSFERABLE_WEEKS,
-        rate_percentage=rate,
+        rate_percentage=elected_rate,
         variants=variants,
         warnings=warnings,
     )

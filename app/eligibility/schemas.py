@@ -3,6 +3,14 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+# Sanity upper bound for monetary input fields (income/debt/contribution base), not a
+# legal limit - purely defensive. Without it, an absurd/malformed value (e.g. a typo
+# with far too many digits) can reach Decimal arithmetic in the calculator and raise
+# decimal.InvalidOperation on .quantize() once it exceeds the default 28-digit
+# precision context, crashing the request with an uncaught HTTP 500 instead of a
+# clean 422. 1 miliard zł/miesiąc is already absurdly higher than any real income.
+_MAX_REASONABLE_MONTHLY_AMOUNT_ZL = Decimal("1000000000.00")
+
 
 class InsuranceTitle(StrEnum):
     umowa_o_prace = "umowa_o_prace"
@@ -51,6 +59,8 @@ class MaternityLeaveEligibilityRequest(BaseModel):
     )
     debt_amount_zl: Decimal | None = Field(
         default=None,
+        ge=0,
+        le=_MAX_REASONABLE_MONTHLY_AMOUNT_ZL,
         description="Zadłużenie składkowe na dzień powstania prawa do zasiłku, jeśli dotyczy.",
     )
     employment_ended_reason: EmploymentEndedReason | None = Field(
@@ -290,6 +300,7 @@ class MaternityLeaveEligibilityRequest(BaseModel):
     average_monthly_income_zl: Decimal | None = Field(
         default=None,
         ge=0,
+        le=_MAX_REASONABLE_MONTHLY_AMOUNT_ZL,
         description=(
             "Średni miesięczny przychód/wynagrodzenie z 12 miesięcy kalendarzowych "
             "poprzedzających miesiąc powstania prawa do świadczenia - podstawa wyliczenia "
@@ -321,6 +332,7 @@ class MaternityLeaveEligibilityRequest(BaseModel):
     voluntary_contribution_base_zl: Decimal | None = Field(
         default=None,
         ge=0,
+        le=_MAX_REASONABLE_MONTHLY_AMOUNT_ZL,
         description=(
             "Dotyczy wyłącznie ubezpieczonych niebędących pracownikami (zlecenie/"
             "działalność gospodarcza): zadeklarowana podstawa wymiaru dobrowolnej składki "

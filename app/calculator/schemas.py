@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.eligibility.schemas import InsuranceTitle
+from app.eligibility.schemas import _MAX_REASONABLE_MONTHLY_AMOUNT_ZL, InsuranceTitle
 
 
 class BasisOfCalculation(BaseModel):
@@ -97,9 +97,13 @@ class ParentCalculationInput(BaseModel):
     rodzicielskiego między rodzicami."""
 
     label: str = Field(description="Etykieta rodzica do wyświetlenia (np. 'Matka', 'Ojciec').")
-    average_monthly_income_zl: Decimal | None = Field(default=None)
+    average_monthly_income_zl: Decimal | None = Field(
+        default=None, ge=0, le=_MAX_REASONABLE_MONTHLY_AMOUNT_ZL
+    )
     insurance_title: InsuranceTitle | None = Field(default=None)
-    voluntary_contribution_base_zl: Decimal | None = Field(default=None)
+    voluntary_contribution_base_zl: Decimal | None = Field(
+        default=None, ge=0, le=_MAX_REASONABLE_MONTHLY_AMOUNT_ZL
+    )
     is_full_time_employment: bool | None = Field(default=None)
 
 
@@ -117,6 +121,16 @@ class ParentalLeaveVariant(BaseModel):
     label: str = Field(description="Opis wariantu (np. 'Matka wykorzystuje maksymalny wymiar').")
     weeks_parent_a: int
     weeks_parent_b: int
+    rate_percentage_parent_a: Decimal = Field(
+        description=(
+            "Stawka zastosowana do tygodni tego rodzica w tym wariancie (70% albo "
+            "81,5% - nigdy 81,5% dla nieprzenoszalnych 9 tygodni drugiego rodzica, "
+            "ustawa zasiłkowa art. 31 ust. 3f)."
+        )
+    )
+    rate_percentage_parent_b: Decimal = Field(
+        description="Stawka zastosowana do tygodni drugiego rodzica w tym wariancie."
+    )
     amount_parent_a_zl: Decimal | None
     amount_parent_b_zl: Decimal | None
     total_household_amount_zl: Decimal | None
@@ -129,6 +143,15 @@ class ParentalLeaveCompareResponse(BaseModel):
             "Liczba tygodni nieprzenoszalnych na rzecz drugiego rodzica (Kodeks pracy art. 1821a)."
         )
     )
-    rate_percentage: Decimal = Field(description="Zastosowana stawka (70% albo 81,5%).")
+    rate_percentage: Decimal = Field(
+        description=(
+            "Stawka zastosowana do 'dzielonej' puli zajmowanej przez rodzica "
+            "wykorzystującego maksymalny wymiar w wariantach 'max' (70% albo 81,5%, "
+            "jeśli full_dose_claimed_within_21_days) - NIE jednolita stawka dla "
+            "wszystkich tygodni każdego wariantu. Zob. rate_percentage_parent_a/b w "
+            "każdym wariancie dla dokładnego rozbicia (nieprzenoszalne 9 tygodni "
+            "drugiego rodzica są zawsze płatne 70%, niezależnie od tej wartości)."
+        )
+    )
     variants: list[ParentalLeaveVariant]
     warnings: list[str] = Field(default_factory=list)
