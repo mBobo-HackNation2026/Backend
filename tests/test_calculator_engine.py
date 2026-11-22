@@ -245,3 +245,58 @@ def test_calculate_stillbirth_funeral_benefit_returns_lump_sum() -> None:
     assert result.basis is None
     assert result.lump_sum_amount_zl == Decimal("7000.00")
     assert result.total_amount_zl == Decimal("7000.00")
+
+
+def _make_supplementary_leave_rule() -> BenefitRuleVersion:
+    return BenefitRuleVersion(
+        version=1,
+        is_current=True,
+        effective_from=date(2026, 1, 1),
+        rate_percentage=Decimal("100.00"),
+        weeks_by_child_count={"1": 20, "2": 31, "3": 33, "4": 35, "5+": 37},
+        duration_until_birth=False,
+        debt_threshold_percent_of_min_wage=Decimal("1.00"),
+        min_wage_reference_zl=Decimal("4806.00"),
+        institution="Pracodawca albo ZUS",
+        legal_basis=["Kodeks pracy art. 1802"],
+        deadlines=[],
+        required_documents=[],
+    )
+
+
+def test_calculate_supplementary_leave_caps_hospitalization_weeks_at_cutoff() -> None:
+    """Regression test for the 002-C2 bug: 17 weeks of hospitalization reported for a
+    650g/29-week birth must be capped at the 15-week extended cutoff (Kodeks pracy
+    art. 1802 §1 pkt 1) - expected 105 days, previously returned 119."""
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        gestational_week_at_birth=29,
+        birth_weight_grams=650,
+        child_hospitalization_weeks=17,
+        average_monthly_income_zl=Decimal("6000.00"),
+        is_full_time_employment=True,
+    )
+
+    result = calculate_benefit("uzupelniajacy_urlop_macierzynski", rule, request)
+
+    assert result.total_days == 105
+    assert result.total_amount_zl == Decimal("18120.90")
+    assert any("ograniczony do 15 tyg" in w for w in result.warnings)
+
+
+def test_calculate_supplementary_leave_without_cutoff_data_warns_uncapped() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=17,
+        average_monthly_income_zl=Decimal("6000.00"),
+        is_full_time_employment=True,
+    )
+
+    result = calculate_benefit("uzupelniajacy_urlop_macierzynski", rule, request)
+
+    assert result.total_days == 119
+    assert any("nie można ograniczyć wymiaru" in w for w in result.warnings)

@@ -1023,6 +1023,79 @@ def test_supplementary_leave_past_hospitalization_cutoff_week_is_still_eligible(
     assert any("8. tydzień" in w or "hospitalizacji" in w for w in result.warnings)
 
 
+def test_supplementary_leave_caps_weeks_at_extended_cutoff_for_premature_birth() -> None:
+    """Regression test for a real bug caught by independent QA (scenario 002-C2):
+    reported 17 weeks of hospitalization for a 650g/29-week birth must be capped at
+    the 15-week extended cutoff (Kodeks pracy art. 1802 §1 pkt 1), not taken at face
+    value - expected 15 weeks (105 days), previously returned 17 weeks (119 days)."""
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        insured_at_birth=True,
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        gestational_week_at_birth=29,
+        birth_weight_grams=650,
+        child_hospitalization_weeks=17,
+        postpartum_weeks_elapsed=2,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 15
+    assert any("ograniczony do 15 tyg" in w for w in result.warnings)
+
+
+def test_supplementary_leave_caps_weeks_at_standard_cutoff_for_term_birth() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=12,
+        gestational_week_at_birth=39,
+        birth_weight_grams=3200,
+        postpartum_weeks_elapsed=2,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.plan is not None
+    assert result.plan.weeks == 8
+
+
+def test_supplementary_leave_does_not_cap_when_hospitalization_below_cutoff() -> None:
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=5,
+        gestational_week_at_birth=29,
+        birth_weight_grams=650,
+        postpartum_weeks_elapsed=2,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.plan is not None
+    assert result.plan.weeks == 5
+    assert not any("ograniczony do" in w for w in result.warnings)
+
+
+def test_supplementary_leave_no_plan_when_cutoff_fields_missing() -> None:
+    """Without gestational_week_at_birth/birth_weight_grams the cutoff can't be
+    determined, so the reported hospitalization weeks must NOT be shown uncapped -
+    this is the exact gap that caused the original bug."""
+    rule = _make_supplementary_leave_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        child_hospitalization_weeks=17,
+        postpartum_weeks_elapsed=2,
+    )
+
+    result = evaluate_supplementary_maternity_leave_eligibility(request, rule)
+
+    assert result.plan is None
+
+
 def test_supplementary_leave_not_eligible_when_filing_deadline_passed() -> None:
     """Real deadline: wniosek nie później niż 21 dni (3 tygodnie) przed końcem urlopu
     macierzyńskiego (Kodeks pracy art. 1802 §4). 1 child -> 20-week maternity leave;

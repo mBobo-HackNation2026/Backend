@@ -893,6 +893,22 @@ _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS = 1000
 _SUPPLEMENTARY_LEAVE_FILING_DEADLINE_WEEKS_BEFORE_END = 3
 
 
+def _resolve_supplementary_leave_cutoff_week(
+    gestational_week_at_birth: int, birth_weight_grams: int
+) -> int:
+    """Kodeks pracy art. 1802 §1: 15. tydzień po porodzie przy urodzeniu <28 tyg.
+    ciąży LUB masie ≤1000g, w pozostałych kwalifikujących przypadkach 8. tydzień."""
+    is_extended_case = (
+        gestational_week_at_birth < _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_GESTATIONAL_WEEK
+        or birth_weight_grams <= _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS
+    )
+    return (
+        _SUPPLEMENTARY_LEAVE_EXTENDED_CUTOFF_WEEK
+        if is_extended_case
+        else _SUPPLEMENTARY_LEAVE_STANDARD_CUTOFF_WEEK
+    )
+
+
 def _build_supplementary_maternity_leave_plan(
     rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest, weeks: int
 ) -> BenefitPlan:
@@ -922,7 +938,7 @@ def evaluate_supplementary_maternity_leave_eligibility(
     solutions: list[PossibleSolution] = []
     warnings: list[str] = []
 
-    weeks: int | None = None
+    hospitalization_weeks_reported: int | None = None
     if request.child_hospitalization_weeks is None:
         missing_data.append("liczba tygodni pobytu dziecka w szpitalu po porodzie")
     elif request.child_hospitalization_weeks <= 0:
@@ -931,15 +947,16 @@ def evaluate_supplementary_maternity_leave_eligibility(
             "macierzyński nie ma zastosowania (Kodeks pracy art. 1802 §1)"
         )
     else:
-        weeks = request.child_hospitalization_weeks
+        hospitalization_weeks_reported = request.child_hospitalization_weeks
         met_conditions.append(
-            f"hospitalizacja dziecka po porodzie przez {weeks} tyg. (Kodeks pracy art. 1802 §1)"
+            f"hospitalizacja dziecka po porodzie przez {hospitalization_weeks_reported} "
+            "tyg. (Kodeks pracy art. 1802 §1)"
         )
 
     # Tydzień graniczny (8. albo 15. po porodzie) ogranicza WYŁĄCZNIE, które tygodnie
     # pobytu w szpitalu wlicza się do wymiaru urlopu (Kodeks pracy art. 1802 §1 i §3) -
     # to NIE jest termin na skorzystanie z urlopu ani na złożenie wniosku (ten jest
-    # osobno, §4, patrz niżej). Tu tylko informujemy, który próg obowiązuje.
+    # osobno, §4, patrz niżej).
     cutoff_week: int | None = None
     if request.gestational_week_at_birth is None or request.birth_weight_grams is None:
         missing_data.append(
@@ -948,14 +965,8 @@ def evaluate_supplementary_maternity_leave_eligibility(
             "tygodnia po porodzie)"
         )
     else:
-        is_extended_case = (
-            request.gestational_week_at_birth < _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_GESTATIONAL_WEEK
-            or request.birth_weight_grams <= _SUPPLEMENTARY_LEAVE_EXTENDED_MAX_BIRTH_WEIGHT_GRAMS
-        )
-        cutoff_week = (
-            _SUPPLEMENTARY_LEAVE_EXTENDED_CUTOFF_WEEK
-            if is_extended_case
-            else _SUPPLEMENTARY_LEAVE_STANDARD_CUTOFF_WEEK
+        cutoff_week = _resolve_supplementary_leave_cutoff_week(
+            request.gestational_week_at_birth, request.birth_weight_grams
         )
         met_conditions.append(
             f"do wymiaru liczą się tygodnie hospitalizacji do {cutoff_week}. tygodnia "
@@ -970,6 +981,22 @@ def evaluate_supplementary_maternity_leave_eligibility(
                 "trwała dłużej, do wymiaru urlopu liczą się tylko tygodnie przypadające "
                 "do tego tygodnia (Kodeks pracy art. 1802 §1 i §3); upewnij się, że "
                 "podana liczba tygodni hospitalizacji już to uwzględnia."
+            )
+
+    # Wymiar urlopu = zgłoszone tygodnie hospitalizacji, ograniczone do granicznego
+    # tygodnia po porodzie (zakłada hospitalizację od dnia porodu - typowy przypadek
+    # wcześniaka trafiającego na OIOM od razu po urodzeniu). Bez znajomości obu
+    # wartości nie da się tego policzyć poprawnie, więc `weeks` zostaje `None` (bez
+    # planu) zamiast pokazywać niesprawdzony, potencjalnie zawyżony wymiar.
+    weeks: int | None = None
+    if hospitalization_weeks_reported is not None and cutoff_week is not None:
+        weeks = min(hospitalization_weeks_reported, cutoff_week)
+        if weeks < hospitalization_weeks_reported:
+            warnings.append(
+                f"Zgłoszono {hospitalization_weeks_reported} tyg. hospitalizacji, ale "
+                f"do wymiaru urlopu liczy się maksymalnie {cutoff_week} tyg. po "
+                "porodzie (Kodeks pracy art. 1802 §1 i §3) - wymiar ograniczony do "
+                f"{weeks} tyg."
             )
 
     # Rzeczywisty termin graniczny: wniosek najpóźniej 21 dni (3 tygodnie) przed

@@ -15,7 +15,10 @@ from app.calculator.schemas import (
     RatePeriod,
 )
 from app.db.models.benefit_rule import BenefitRuleVersion
-from app.eligibility.engine import _weeks_for_children_count
+from app.eligibility.engine import (
+    _resolve_supplementary_leave_cutoff_week,
+    _weeks_for_children_count,
+)
 from app.eligibility.schemas import InsuranceTitle, MaternityLeaveEligibilityRequest
 from app.rules.seed import (
     ADOPTION_LEAVE_BENEFIT_CODE,
@@ -225,9 +228,29 @@ def _resolve_segments(
         return days, [(days, rate)], []
 
     if benefit_code == SUPPLEMENTARY_MATERNITY_LEAVE_BENEFIT_CODE:
-        weeks = request.child_hospitalization_weeks or 0
+        hospitalization_weeks = request.child_hospitalization_weeks or 0
+        if request.gestational_week_at_birth is not None and request.birth_weight_grams is not None:
+            cutoff_week = _resolve_supplementary_leave_cutoff_week(
+                request.gestational_week_at_birth, request.birth_weight_grams
+            )
+            weeks = min(hospitalization_weeks, cutoff_week)
+            warnings = []
+            if weeks < hospitalization_weeks:
+                warnings.append(
+                    f"Zgłoszono {hospitalization_weeks} tyg. hospitalizacji, ale do "
+                    f"wymiaru urlopu liczy się maksymalnie {cutoff_week} tyg. po "
+                    "porodzie (Kodeks pracy art. 1802 §1 i §3) - wymiar ograniczony "
+                    f"do {weeks} tyg."
+                )
+        else:
+            weeks = hospitalization_weeks
+            warnings = [
+                "Brak danych o tygodniu ciąży w dniu porodu i masie urodzeniowej "
+                "dziecka - nie można ograniczyć wymiaru do ustawowego limitu (Kodeks "
+                "pracy art. 1802 §1 i §3); poniższa liczba dni może być zawyżona."
+            ]
         days = weeks * 7
-        return days, [(days, rule.rate_percentage)], []
+        return days, [(days, rule.rate_percentage)], warnings
 
     # zasilek_macierzynski_urlop_macierzynski, urlop_ojcowski,
     # urlop_na_warunkach_urlopu_macierzynskiego: płaska tabela tygodni wg liczby dzieci.

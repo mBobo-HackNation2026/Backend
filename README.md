@@ -98,10 +98,20 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     jak wcześniej błędnie modelowano. Rzeczywisty termin graniczny to
     wniosek złożony nie później niż 21 dni przed zakończeniem podstawowego
     urlopu macierzyńskiego (art. 1802 §4, liczony z `postpartum_weeks_elapsed`
-    względem standardowej tabeli tygodni). Trzeci, węższy przypadek z art.
-    1802 §1 pkt 3 (poród o czasie z późniejszą hospitalizacją) nadal nie jest
-    osobno modelowany. Zob. `app/eligibility/engine.py` →
-    `evaluate_supplementary_maternity_leave_eligibility`.
+    względem standardowej tabeli tygodni). **Druga poprawka (znaleziona przez
+    niezależny test QA ze scenariuszem wcześniaka 650g/17 tyg. hospitalizacji)**:
+    `child_hospitalization_weeks` nie było wcześniej ograniczane do granicznego
+    tygodnia - 17 zgłoszonych tygodni dawało błędnie 17 tygodni urlopu zamiast
+    poprawnych 15 (ustawowy limit dla urodzenia ≤1000g). Silnik i kalkulator
+    teraz liczą `min(child_hospitalization_weeks, tydzień graniczny)` i jawnie
+    ostrzegają, gdy ograniczenie zostało zastosowane; bez danych o tygodniu
+    ciąży/masie urodzeniowej silnik uprawnień nie pokazuje planu wcale (zamiast
+    niesprawdzonego, potencjalnie zawyżonego wymiaru), a kalkulator pokazuje
+    nieograniczoną wartość z jawnym ostrzeżeniem o braku możliwości weryfikacji.
+    Trzeci, węższy przypadek z art. 1802 §1 pkt 3 (poród o czasie z późniejszą
+    hospitalizacją) nadal nie jest osobno modelowany. Zob.
+    `app/eligibility/engine.py` → `evaluate_supplementary_maternity_leave_eligibility`
+    i `app/calculator/engine.py` → `_resolve_segments`.
   - `urlop_na_warunkach_urlopu_macierzynskiego` — adopcja/rodzina
     zastępcza, ta sama tabela tygodni co zasiłek macierzyński (20/31/33/35/37),
     100% podstawy. `is_adoption_or_foster_care` ustala czy to w ogóle dotyczy
