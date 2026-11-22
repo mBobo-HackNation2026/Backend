@@ -436,6 +436,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
 | 8 | eBobo Legal Intelligence — Funkcja 1: wyjaśnianie wyniku oceny przez AI (OpenRouter), ugruntowane w lokalnej bazie wiedzy prawnej (minimalny RAG) | ✅ zrobione - patrz "Zrobione" wyżej; Funkcje 2-4 (odwołania od ZUS, feedback, zatwierdzanie zmian reguł) odłożone |
 | 9 | eBobo Legal Intelligence — Etap 2, Faza A: zgłaszanie wątpliwości co do oceny (`POST /legal-feedback`) | ✅ zrobione - patrz "Zrobione" wyżej; Faza B (analiza AI zgłoszenia + panel administratora) osobne zadanie |
+| 10 | Migracje bazy (Alembic) — wymaganie P0 z briefu Etap 2 Fazy B, zabezpieczenie przed `rm -f app.db` jako "metodą" zmiany schematu | ✅ zrobione - patrz "Migracje bazy (Alembic)" niżej |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
@@ -497,7 +498,8 @@ app/
   services/         # (zarezerwowane, obecnie puste - logika biznesowa żyje w modułach wyżej)
   main.py           # fabryka aplikacji FastAPI (create_app), montuje /admin jako static files
 static/admin/       # statyczny frontend panelu administracyjnego (vanilla HTML/JS, bez build stepu)
-tests/              # 228 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
+tests/              # 231 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
+alembic/            # migracje schematu (alembic/versions/) - jedyny sposób zmiany schematu bazy
 ```
 
 Zasady architektoniczne:
@@ -715,7 +717,7 @@ legal-advisor nie zwraca 500 w normalnym działaniu -
 Wymagany [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-# instalacja zależności (w tym dev: pytest, ruff, httpx)
+# instalacja zależności (w tym dev: pytest, ruff; httpx/alembic to zależności główne)
 uv sync
 
 # plik środowiskowy
@@ -731,6 +733,34 @@ API będzie dostępne pod `http://localhost:8000`:
 - ReDoc: `http://localhost:8000/redoc`
 - Healthcheck: `http://localhost:8000/api/v1/health`
 - Panel administracyjny: `http://localhost:8000/admin` (login: `ADMIN_USERNAME`/`ADMIN_PASSWORD` z `.env`, domyślnie `admin`/`changeme`)
+
+### Migracje bazy (Alembic)
+
+**Schemat bazy jest teraz zarządzany wyłącznie przez Alembic** (`alembic/versions/`)
+- `Base.metadata.create_all()`/`rm -f app.db` **nie są już sposobem na zmianę
+schematu**. Serwer sam uruchamia `alembic upgrade head` przy starcie
+(`app/db/session.py`), więc zwykłe `uv run uvicorn app.main:app --reload` zawsze
+dogania bazę do aktualnego schematu — nowa, pusta baza przechodzi przez
+wszystkie migracje od zera, a istniejąca dostaje tylko brakujące. **Wyjątek
+jednorazowy**: baza utworzona jeszcze przed wprowadzeniem Alembic (stary
+`create_all()`) zostaje rozpoznana i oznaczona jako aktualna (`alembic stamp
+head`) zamiast próbować odtworzyć już istniejące tabele — to był root cause
+awarii panelu admina 2026-11-22 (`no such column: request_log_entries.user_id`),
+która już się nie powtórzy.
+
+Po zmianie modelu ORM (`app/db/models/`) **zawsze** dodaj migrację, zanim
+zmiana trafi do `main`:
+
+```bash
+uv run alembic revision --autogenerate -m "krótki opis zmiany"
+# przejrzyj wygenerowany plik w alembic/versions/ - autogenerate nie zawsze
+# trafia w 100% (np. nie wykrywa zmian server_default) - zweryfikuj ręcznie
+uv run alembic upgrade head   # zastosuj lokalnie i sprawdź, że serwer wciąż startuje
+```
+
+`alembic/env.py` czyta `DATABASE_URL` z tych samych ustawień co aplikacja
+(`.env`) - migracje działają identycznie dla SQLite (tryb "batch", bo SQLite
+nie wspiera większości `ALTER TABLE` wprost) i PostgreSQL.
 
 ### Panel administracyjny
 
