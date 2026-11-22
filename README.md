@@ -270,6 +270,38 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     ("oznacz tę ocenę jako błędną i wykorzystaj do poprawy reguł") jest
     świadomie odłożona na później, na wyraźną prośbę użytkownika. Zob.
     pamięć projektu `project-ebobo-admin-request-log`.
+- **eBobo Legal Intelligence — Funkcja 1 (nowość)**: AI (OpenRouter) wyjaśnia w
+  prostym języku wynik oceny uprawnień (`not_eligible`/`requires_verification`),
+  zamiast suchej listy `missing_data`/`unmet_conditions`.
+  - `POST /api/v1/legal-advisor/explain/{benefit_code}` — przyjmuje **ten sam**
+    payload co `/eligibility/check/{benefit_code}` i **sam ponownie wywołuje
+    silnik** (nigdy nie ufa wynikowi zadeklarowanemu przez frontend).
+  - AI dostaje wyłącznie zminimalizowane dane: opisy warunków już
+    wygenerowane przez silnik (`met_conditions`/`unmet_conditions`/
+    `missing_data`/`warnings`) i listę dozwolonych cytatów prawnych z reguły
+    (`legal_basis`) — nigdy surowego payloadu użytkownika (dochody, dane
+    zdrowotne dziecka itd.).
+  - **Status/kwota zawsze z silnika, nigdy z AI** — schemat odpowiedzi AI
+    (`AIExplanationRaw`) nie ma nawet pola na status/kwotę.
+  - **Każdy cytat prawny zwrócony przez AI jest sprawdzany** względem zbioru
+    przepisów faktycznie zapisanych w `BenefitRuleVersion.legal_basis` —
+    niezweryfikowane cytaty są cicho odrzucane i wymuszają
+    `requires_additional_verification=true`, nigdy nie trafiają do
+    użytkownika jako potwierdzone.
+  - **Niedostępność OpenRouter (brak klucza, timeout, błąd HTTP, nieprawidłowy
+    JSON) nigdy nie zwraca HTTP 500** — zwracany jest deterministyczny
+    fallback (`ai_available=false`, `source="fallback"`) zbudowany wyłącznie
+    z wyniku silnika.
+  - Każde wywołanie loguje się do tego samego `request_log` co
+    eligibility/calculate/compare (`endpoint="legal_advisor_explain"`,
+    `request_log_entry_id` w odpowiedzi) — przygotowanie pod przyszłe
+    powiązanie oceny + wersji reguł + analizy AI + feedbacku użytkownika
+    (Funkcje 2-4, jeszcze nie zaimplementowane).
+  - Konfiguracja: `OPENROUTER_API_KEY`/`OPENROUTER_MODEL`/
+    `OPENROUTER_BASE_URL`/`OPENROUTER_TIMEOUT_SECONDS` w `.env` (klucz
+    dostarcza użytkownik lokalnie, nigdy w repo). Bez klucza endpoint działa
+    normalnie w trybie fallback.
+  - Zob. pamięć projektu `project-ebobo-legal-advisor`.
 
 ### W trakcie / tymczasowe
 
@@ -321,6 +353,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 5 | Przygotowane scenariusze testowe — ustrukturyzowane profile + dane wejściowe JSON per sprawa (nie publikujemy chronionych PDF-ów ZUS) | ⬜ nierozpoczęte |
 | 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ✅ zrobione - patrz "Zrobione" wyżej; lista organizacji charytatywnych celowo pusta (wymaga zweryfikowanych danych) |
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
+| 8 | eBobo Legal Intelligence — Funkcja 1: wyjaśnianie wyniku oceny przez AI (OpenRouter) | ✅ zrobione - patrz "Zrobione" wyżej; Funkcje 2-4 (odwołania od ZUS, feedback, zatwierdzanie zmian reguł) odłożone |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
@@ -403,9 +436,20 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+Każdy test (`tests/conftest.py`) dostaje własną, świeżą bazę SQLite
+in-memory (nadpisanie `get_db`) - **nigdy** nie dotyka realnego `app.db` z
+dev servera. Wcześniej `client` był podpięty wprost pod `app.db`, więc wpisy
+`request_log` z kolejnych uruchomień testów (i z ręcznego smoke-testu)
+zostawały na stałe i z czasem łamały asercje liczące wpisy dla danego
+`benefit_code` - naprawione przy okazji dodania
+`POST /legal-advisor/explain/{benefit_code}` (kolejny endpoint piszący do
+`request_log`), zanim zdążyło narobić tej samej szkody co incydent opisany
+w pamięci `feedback-ebobo-shared-dev-db`.
+
 ## Konfiguracja
 
 Wszystkie ustawienia czytane są ze zmiennych środowiskowych / pliku `.env`
 (zobacz `.env.example`): nazwa aplikacji, prefiks API, dozwolone originy CORS,
-`DATABASE_URL`, parametry uploadu plików oraz adresy symulowanych integracji
-ZUS/mObywatel.
+`DATABASE_URL`, parametry uploadu plików, adresy symulowanych integracji
+ZUS/mObywatel oraz dostawcę AI (`OPENROUTER_API_KEY`/`OPENROUTER_MODEL`/
+`OPENROUTER_BASE_URL`/`OPENROUTER_TIMEOUT_SECONDS`) dla `/legal-advisor/explain`.

@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     zus_mock_base_url: str = "https://mock.zus.local"
     mobywatel_mock_base_url: str = "https://mock.mobywatel.local"
 
+    # Dostawca AI (eBobo Legal Intelligence, Funkcja 1 - wyjaśnianie wyników oceny
+    # uprawnień). Klucz dostarczany lokalnie przez użytkownika w .env - nigdy nie trafia
+    # do repozytorium. Model i base_url celowo konfigurowalne, żeby logika aplikacji nie
+    # była na stałe związana z jednym dostawcą/modelem.
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "openai/gpt-4o-mini"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_timeout_seconds: float = 15.0
+
     # Panel administracyjny (MVP: jeden użytkownik, dane z env) - do rozbudowy o
     # pełny model użytkowników/ról, gdy panel wyjdzie poza zakres hackathonu.
     admin_username: str = "admin"

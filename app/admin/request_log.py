@@ -18,7 +18,7 @@ def log_request(
     status_code: int,
     request_payload: dict,
     response_payload: dict,
-) -> None:
+) -> RequestLogEntry:
     entry = RequestLogEntry(
         endpoint=endpoint,
         benefit_code=benefit_code,
@@ -28,6 +28,8 @@ def log_request(
     )
     db.add(entry)
     db.commit()
+    db.refresh(entry)
+    return entry
 
 
 def list_request_log_entries(
