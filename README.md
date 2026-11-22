@@ -414,25 +414,251 @@ Kolejne moduły będą dodawane iteracyjnie w `app/services`, `app/eligibility`,
 
 ```
 app/
-  core/           # konfiguracja (Settings), wyjątki domenowe
-  admin/          # autoryzacja panelu administracyjnego (JWT, jeden użytkownik z env)
+  core/             # konfiguracja (Settings, zmienne .env), wyjątki domenowe + handlery FastAPI
+  db/
+    base.py         # Base (SQLAlchemy declarative)
+    session.py      # engine, SessionLocal, get_db(), ensure_seeded() przy starcie
+    models/
+      benefit_rule.py  # BenefitType, BenefitRuleVersion (wersjonowane reguły/stawki/dokumenty)
+      user.py          # User, AuthStatus (sesja end-usera)
+      request_log.py   # RequestLogEntry (log "Wnioski" w panelu admina)
+  rules/
+    seed.py         # jedyne źródło prawdy dla stawek/okresów/dokumentów/terminów - ensure_seeded()
+  eligibility/      # SILNIK UPRAWNIEŃ - czysta logika, bez HTTP/DB w środku
+    schemas.py      # MaternityLeaveEligibilityRequest (wspólny request), EligibilityResult, MissingFieldInfo, BenefitPlan...
+    engine.py       # 9 evaluate_*_eligibility(), _resolve_maternity_leave_weeks, _missing()/_missing_many()
+    registry.py     # ELIGIBILITY_EVALUATORS: benefit_code -> funkcja oceny
+    rules_repository.py  # get_current_rule(db, benefit_code)
+  calculator/       # KALKULATOR KWOT - niezależny od potwierdzonych uprawnień
+    schemas.py      # CalculatedAmount, ParentalLeaveCompareRequest/Response...
+    engine.py       # calculate_basis_of_calculation(), calculate_benefit(), compare_parental_leave_variants()
+  legal_advisor/    # eBobo Legal Intelligence, Funkcja 1 - AI (OpenRouter) wyjaśnia wynik oceny
+    schemas.py      # AIExplanationRaw, GroundedRecommendation, LegalAdvisorExplainResponse
+    service.py      # explain_eligibility_result() - re-uruchamia silnik, groundinguje w legal_knowledge
+  legal_knowledge/  # "minimalny RAG" - statyczna baza fragmentów wiedzy prawnej, bez bazy wektorowej
+    fragments.py    # LEGAL_FRAGMENTS (23 fragmenty: ustawa zasiłkowa, Kodeks pracy, Poradnik ZUS)
+    repository.py   # get_fragments_for_benefit(), get_fragment_by_id()
+  ai_provider/      # cienki, dostawca-agnostyczny klient OpenRouter (OpenAI-compatible chat completions)
+    client.py       # request_json_completion(), AIProviderUnavailableError/AIProviderInvalidResponseError
+  mock_zus/         # MockZUSProvider - symulowane dane ZUS per profil demonstracyjny
+    profiles.py     # 5 statycznych profili
+    comparator.py   # porównanie deklaracji usera vs. profilu, pole-po-polu
+  formalities/      # przewodnik po formalnościach (dokumenty/terminy/ryzyka/next_steps)
+    content.py      # statyczne treści wzięte wprost z briefu (Projekt.pdf §H/§I)
+  admin/            # panel administracyjny (JWT, jeden użytkownik z env) + log zapytań
+    security.py     # create_admin_access_token(), get_current_admin()
+    request_log.py  # log_request()/list_request_log_entries()/get_request_log_entry()
+  auth/             # sesja end-usera (anonimowa -> symulowane logowanie mObywatel)
+    security.py     # create_user_token(), get_current_user(), get_user_for_refresh()
   api/v1/
-    endpoints/    # pojedyncze routery REST (health, admin, docelowo: calculator, eligibility, documents, integrations)
-    router.py     # agregacja routerów v1
-  schemas/        # modele Pydantic (request/response)
-  services/       # logika biznesowa (obliczenia, weryfikacja, integracje, parsing PDF)
-  rules/          # parametry i progi świadczeń, oddzielone od logiki obliczeniowej
-  db/             # SQLAlchemy: engine, sesje, modele ORM
-  main.py         # fabryka aplikacji FastAPI
-static/admin/     # statyczny frontend panelu administracyjnego (vanilla HTML/JS)
-tests/            # testy pytest
+    endpoints/      # po jednym routerze na moduł: health, auth, eligibility, calculator,
+                     #   legal_advisor, mock_zus, formalities, admin
+    router.py       # agregacja wszystkich routerów v1
+  schemas/common.py # HealthResponse
+  services/         # (zarezerwowane, obecnie puste - logika biznesowa żyje w modułach wyżej)
+  main.py           # fabryka aplikacji FastAPI (create_app), montuje /admin jako static files
+static/admin/       # statyczny frontend panelu administracyjnego (vanilla HTML/JS, bez build stepu)
+tests/              # 216 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
 ```
 
-Zasada: **reguły i kwoty świadczeń (`app/rules`) są oddzielone od logiki
-obliczeniowej (`app/services`)**, żeby aktualizacja przepisów nie wymagała
-zmian w kodzie liczącym. AI może pomagać w interpretacji dokumentów i
-tłumaczeniu wyników użytkownikowi, ale same obliczenia świadczeń mają być
-deterministyczne i oparte wyłącznie o zweryfikowane reguły z briefu ZUS.
+Zasady architektoniczne:
+- **Reguły i kwoty świadczeń (`app/rules`, `BenefitRuleVersion`) są oddzielone od
+  logiki obliczeniowej (`app/eligibility`, `app/calculator`)** — aktualizacja
+  przepisów (stawki, terminy, dokumenty) nie wymaga zmian w kodzie liczącym,
+  tylko nowej wersji reguły w bazie.
+- **Silnik uprawnień jest deterministyczny i ma zawsze pierwszeństwo przed AI.**
+  `app/legal_advisor` nigdy nie ustala statusu ani kwoty — tylko tłumaczy w
+  prostym języku wynik, który silnik już wyliczył, i to tylko w oparciu o
+  fragmenty faktycznie zweryfikowane względem `app/legal_knowledge`.
+- **Nigdy nie zgaduj** — brakujące dane zawsze trafiają do `missing_data`/
+  `missing_fields`, nigdy nie są cicho zakładane (np. `is_full_time_employment`
+  nieznane → brak podstawy minimalnej zamiast zgadywania; `children_survived_count`
+  nieznane przy wieloraczkach i martwym urodzeniu → `requires_verification`
+  zamiast zawyżonego wymiaru).
+
+## Pełna referencja API
+
+Zawsze aktualny, auto-generowany schemat (dokładne typy, przykłady) jest pod
+`/docs` (Swagger) i `/redoc`. Poniżej narracyjna referencja wszystkich
+endpointów i wspólnego schematu requestu - do szybkiej orientacji bez
+klikania po Swaggerze. Prefiks wszystkich ścieżek API: `/api/v1`.
+
+### `MaternityLeaveEligibilityRequest` - wspólny schemat dla eligibility/calculate/legal-advisor
+
+Jeden, wspólny request dla `POST /eligibility/check/{benefit_code}`,
+`POST /benefits/calculate/{benefit_code}` i `POST /legal-advisor/explain/{benefit_code}`.
+Każde pole dotyczy tylko tych świadczeń, których ocena go faktycznie używa -
+pozostałe są po prostu ignorowane. Tylko `children_count` jest wymagane
+(`≥1`); wszystkie pozostałe to `| None` - brak/`null` oznacza "nieznane", nigdy
+nie jest traktowane jako "nie".
+
+| Pole | Typ | Używane przez |
+|---|---|---|
+| `children_count` | `int` (wymagane, ≥1) | wszystkie |
+| `insured_at_birth` | `bool` | macierzyński, rodzicielski |
+| `insurance_title` | `"umowa_o_prace"\|"zlecenie"\|"dzialalnosc_gospodarcza"\|"inny"` | macierzyński, chorobowy w ciąży, kalkulator |
+| `debt_amount_zl` | `Decimal` (0-1 mld) | próg zadłużenia art. 2a (5 świadczeń) |
+| `employment_ended_reason` | `"upadlosc_likwidacja_smierc_pracodawcy"\|"naruszenie_prawa_wyrokiem_sadu"` | macierzyński, alternatywny |
+| `other_employment_secured` | `bool` | alternatywny |
+| `father_insured` | `bool` | urlop ojcowski |
+| `child_age_months` | `int` | urlop ojcowski |
+| `is_pregnant` | `bool` | chorobowy w ciąży, rehabilitacyjne |
+| `insured_days_continuous` | `int` | chorobowy w ciąży (okres wyczekiwania) |
+| `child_hospitalization_weeks` | `int` | uzupełniający urlop macierzyński |
+| `gestational_week_at_birth` | `int` | uzupełniający urlop macierzyński |
+| `birth_weight_grams` | `int` | uzupełniający urlop macierzyński |
+| `postpartum_weeks_elapsed` | `int` | uzupełniający urlop macierzyński (termin wniosku) |
+| `is_adoption_or_foster_care` | `bool` | adopcja/rodzina zastępcza |
+| `foster_care_type` | `"rodzina_zastepcza"\|"rodzina_zastepcza_zawodowa"\|"wniosek_o_przysposobienie"` | adopcja/rodzina zastępcza |
+| `child_age_years` | `int` | adopcja/rodzina zastępcza |
+| `school_obligation_deferred` | `bool` | adopcja/rodzina zastępcza (limit wieku 7 vs 10 lat) |
+| `za_zyciem_certificate` | `bool` | urlop rodzicielski (wydłużony wymiar) |
+| `full_dose_claimed_within_21_days` | `bool` | urlop rodzicielski (stawka 70% vs 81,5%) |
+| `other_parent_used_parental_leave_weeks` | `int` | urlop rodzicielski (pula drugiego rodzica) |
+| `part_time_fraction_during_parental_leave` | `Decimal` (≤0.5) | urlop rodzicielski (łączenie z pracą) |
+| `sickness_benefit_period_exhausted` | `bool` | świadczenie rehabilitacyjne |
+| `medical_prognosis_recovery_possible` | `bool` | świadczenie rehabilitacyjne |
+| `excluded_from_rehabilitation_benefit` | `bool` | świadczenie rehabilitacyjne |
+| `is_stillbirth_or_infant_death` | `bool` | macierzyński (art. 1801, skraca do 8 tyg.), zasiłek pogrzebowy |
+| `children_survived_count` | `int` (**nowość**) | macierzyński - wymiar przy wieloraczkach z martwym urodzeniem/zgonem części dzieci |
+| `days_since_death` | `int` | macierzyński (próg 7 dni od zgonu, **jeszcze niemodelowany** - patrz "Zrobione") |
+| `days_since_burial` | `int` | zasiłek pogrzebowy (termin 12 mies. od pochówku, **nie** od zgonu) |
+| `average_monthly_income_zl` | `Decimal` (0-1 mld) | kalkulator (podstawa wymiaru, pracownik) |
+| `is_full_time_employment` | `bool` | kalkulator (podstawa minimalna, art. 45 ust. 1) |
+| `employment_duration_months` | `int` | kalkulator (**jeszcze nieużywane**) |
+| `voluntary_contribution_base_zl` | `Decimal` (0-1 mld) | kalkulator (podstawa wymiaru, zlecenie/działalność) |
+| `bonus_type` | `"miesieczna"\|"kwartalna"\|"roczna"` | kalkulator (**jeszcze nieużywane**) |
+| `months_since_last_benefit` | `Decimal` | kalkulator (**jeszcze nieużywane**) |
+
+### Kody świadczeń (`benefit_code`)
+
+| Kod | Nazwa |
+|---|---|
+| `zasilek_macierzynski_urlop_macierzynski` | Zasiłek macierzyński za okres urlopu macierzyńskiego |
+| `zasilek_w_wysokosci_zasilku_macierzynskiego` | Zasiłek w wysokości zasiłku macierzyńskiego (po ustaniu ubezpieczenia w ciąży) |
+| `urlop_ojcowski` | Zasiłek macierzyński za okres urlopu ojcowskiego |
+| `urlop_rodzicielski` | Zasiłek macierzyński za okres urlopu rodzicielskiego |
+| `zasilek_chorobowy_w_ciazy` | Zasiłek chorobowy w ciąży |
+| `swiadczenie_rehabilitacyjne` | Świadczenie rehabilitacyjne |
+| `uzupelniajacy_urlop_macierzynski` | Zasiłek za okres uzupełniającego urlopu macierzyńskiego |
+| `urlop_na_warunkach_urlopu_macierzynskiego` | Zasiłek za okres urlopu na warunkach urlopu macierzyńskiego (adopcja/rodzina zastępcza) |
+| `zasilek_pogrzebowy_martwe_urodzenie` | Zasiłek pogrzebowy w razie martwego urodzenia dziecka |
+
+### Auth (sesja end-usera - w pełni symulowana, nie prawdziwe mObywatel)
+
+| Endpoint | Auth | Opis |
+|---|---|---|
+| `POST /auth/session` | brak | Tworzy anonimową sesję (pierwsze otwarcie appki). Zwraca `access_token`, `user_id`, `status: "anonymous"`. |
+| `POST /auth/mobywatel/login` | `Bearer <token>` | Symulowane logowanie - podnosi sesję do `status: "authenticated"`, ustawia przykładowe dane. Body: `{pesel?: string}`. |
+| `GET /auth/me` | `Bearer <token>` | `{user_id, status, first_name, last_name, pesel}`. |
+| `POST /auth/refresh` | `Bearer <token>` (działa nawet po wygaśnięciu) | Nowy token dla tego samego `user_id`. |
+| `POST /auth/logout` | `Bearer <token>` | Unieważnia bieżącą sesję (`token_version`), zwraca nową sesję anonimową. |
+
+### Eligibility
+
+**`POST /eligibility/check/{benefit_code}`** - brak auth. Request: patrz tabela
+pól wyżej. Response (`EligibilityResult`):
+
+```
+benefit_code, benefit_name
+status: "likely_eligible" | "not_eligible" | "requires_verification"
+met_conditions: string[]
+unmet_conditions: string[]
+missing_data: string[]              # wolny tekst do wyświetlenia
+missing_fields: [{field, message}]  # stabilne id pól (patrz "Zrobione") - message = ten sam tekst co w missing_data
+possible_solutions: [{type: "alternative_benefit"|"corrective_action"|"limitation", description, legal_basis?, related_benefit_code?}]
+plan: null | {weeks?, duration_description?, rate_percentage?, lump_sum_amount_zl?, institution, required_documents: [{code,name,when}], deadlines: string[], legal_basis: string[]}
+rules_version: int
+data_source: "user"
+warnings: string[]
+```
+
+404 dla nieznanego `benefit_code`, 422 dla złego payloadu. `plan` jest `null`,
+gdy status `!= likely_eligible` (poza wyjątkiem: `requires_verification` z
+pustymi `unmet_conditions` też może mieć plan, gdy tylko brakuje danych
+niezwiązanych bezpośrednio z samym planem).
+
+### Calculator
+
+**`POST /benefits/calculate/{benefit_code}`** - ten sam request co eligibility,
+niezależnie od statusu uprawnień. Response (`CalculatedAmount`):
+
+```
+benefit_code, benefit_name
+basis: null | {monthly_basis_zl, daily_basis_zl, deduction_rate_percent, minimum_basis_applied, warnings[]}
+total_days: int | null
+total_amount_zl: decimal | null
+lump_sum_amount_zl: decimal | null
+rate_breakdown: [{days, rate_percentage, amount_zl}]
+rules_version: int
+warnings: string[]
+```
+
+**`POST /benefits/compare/urlop-rodzicielski`** - porównanie 3 wariantów
+podziału urlopu rodzicielskiego. Request: `{children_count, za_zyciem_certificate?,
+full_dose_claimed_within_21_days?, parent_a: ParentCalculationInput, parent_b: ParentCalculationInput}`,
+gdzie `ParentCalculationInput = {label, average_monthly_income_zl?, insurance_title?,
+voluntary_contribution_base_zl?, is_full_time_employment?}`. Response:
+`{total_pool_weeks, non_transferable_weeks_per_parent, rate_percentage, variants: [{label, weeks_parent_a, weeks_parent_b, rate_percentage_parent_a, rate_percentage_parent_b, amount_parent_a_zl, amount_parent_b_zl, total_household_amount_zl}], warnings[]}`.
+
+### Legal Advisor
+
+**`POST /legal-advisor/explain/{benefit_code}`** - identyczny request co
+eligibility (sam ponownie liczy wynik silnikiem). Response
+(`LegalAdvisorExplainResponse`):
+
+```
+benefit_code, status          # status zawsze = wynik silnika
+explanation: string
+missing_data_explained: string[]
+suggested_next_steps: string[]
+other_benefits_to_check: string[]
+verified_legal_basis: string[]        # faktyczna treść przepisów, zweryfikowana
+requires_additional_verification: bool
+rules_version: int
+ai_available: bool
+source: "ai" | "fallback"
+request_log_entry_id: int | null
+```
+
+`source=="ai"` oznacza realne wywołanie OpenRouter (do ~15s, pokaż loader).
+`source=="fallback"` (brak klucza/timeout/zła odpowiedź/brak fragmentów wiedzy
+dla świadczenia) - zawsze HTTP 200 z sensowną treścią zbudowaną z samego
+wyniku silnika, nigdy 500.
+
+### MockZUSProvider
+
+| Endpoint | Opis |
+|---|---|
+| `GET /mock-zus/profiles` | `[{profile_id, label, description}]` - 5 profili. |
+| `GET /mock-zus/profiles/{profile_id}` | Pełne symulowane dane: ubezpieczenie, okresy, zadłużenie, e-ZLA, historia świadczeń, zawsze z `data_source: "mock_zus_simulated"`. |
+| `POST /mock-zus/profiles/{profile_id}/compare` | Body: deklaracje usera. Response: `comparisons: [{field, declared_value, simulated_value, matches: bool\|null}]`, `has_discrepancies: bool`. |
+
+### Formalities
+
+| Endpoint | Opis |
+|---|---|
+| `GET /formalities/general` | `how_benefits_are_paid`, `general_risks[]`, `employment_protection_note`, `charitable_support_note`, `difficult_situation_benefit_codes[]`. |
+| `GET /formalities/{benefit_code}` | `institution`, `required_documents[]`, `deadlines[]`, `legal_basis[]`, `next_steps[]`, `rules_version`. |
+
+### Admin (panel wewnętrzny, osobny login)
+
+`POST /admin/login` (`{username, password}` → JWT) →
+`GET /admin/me`, `GET /admin/dashboard`,
+`GET /admin/request-log?benefit_code=...&limit=...`,
+`GET /admin/request-log/{id}` - wszystkie wymagają
+`Authorization: Bearer <admin_token>`.
+
+### Health
+
+`GET /health` - brak auth. `{status, app_name, environment, version}`.
+
+### Błędy ogólne
+
+`404` nieznany `benefit_code`/`profile_id`/id, `422` walidacja body (komunikat
+wskazuje pole), `401` brak/zły token. Żaden endpoint eligibility/calculator/
+legal-advisor nie zwraca 500 w normalnym działaniu -
+`requires_verification`/`not_eligible`/`fallback` to zawsze 200.
 
 ## Uruchomienie lokalne
 
