@@ -189,6 +189,70 @@ def test_calculate_maternity_leave_without_income_returns_no_amount() -> None:
     assert any("Brak danych o dochodzie" in w for w in result.warnings)
 
 
+def test_calculate_maternity_leave_stillbirth_single_child_caps_at_56_days() -> None:
+    """Regression test matching the eligibility-side fix: Kodeks pracy art. 1801 §1
+    caps a single-child stillbirth/early-infant-death maternity leave at 8 weeks (56
+    days), not the full 20-week/140-day table value."""
+    rule = _make_maternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        average_monthly_income_zl=Decimal("6000.00"),
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        is_stillbirth_or_infant_death=True,
+    )
+
+    result = calculate_benefit("zasilek_macierzynski_urlop_macierzynski", rule, request)
+
+    assert result.total_days == 56
+    assert any("art. 1801" in w for w in result.warnings)
+
+
+def test_calculate_maternity_leave_stillbirth_multiple_children_without_survivor_count() -> None:
+    rule = _make_maternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=2,
+        average_monthly_income_zl=Decimal("6000.00"),
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        is_stillbirth_or_infant_death=True,
+    )
+
+    result = calculate_benefit("zasilek_macierzynski_urlop_macierzynski", rule, request)
+
+    assert result.total_days is None
+    assert result.total_amount_zl is None
+
+
+def test_calculate_maternity_leave_stillbirth_multiple_children_one_survivor() -> None:
+    rule = _make_maternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=2,
+        average_monthly_income_zl=Decimal("6000.00"),
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        is_stillbirth_or_infant_death=True,
+        children_survived_count=1,
+    )
+
+    result = calculate_benefit("zasilek_macierzynski_urlop_macierzynski", rule, request)
+
+    assert result.total_days == 140  # 20-week (1-child) table, not 8 weeks or 31 weeks
+
+
+def test_calculate_paternity_leave_is_unaffected_by_stillbirth_flag() -> None:
+    """Kodeks pracy art. 1801 governs the mother's own maternity leave after giving
+    birth - it does not apply to urlop_ojcowski, so this flag must not change it."""
+    rule = _make_maternity_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1,
+        average_monthly_income_zl=Decimal("6000.00"),
+        insurance_title=InsuranceTitle.umowa_o_prace,
+        is_stillbirth_or_infant_death=True,
+    )
+
+    result = calculate_benefit("urlop_ojcowski", rule, request)
+
+    assert result.total_days == 140
+
+
 def test_calculate_rehabilitation_benefit_splits_rate_by_period_when_not_pregnant() -> None:
     rule = _make_rehabilitation_rule()
     request = MaternityLeaveEligibilityRequest(

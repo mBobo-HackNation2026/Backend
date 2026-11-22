@@ -165,7 +165,12 @@ def _decide_status(
     return EligibilityStatus.likely_eligible
 
 
-def _build_plan(rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequest) -> BenefitPlan:
+def _build_plan(
+    rule: BenefitRuleVersion,
+    request: MaternityLeaveEligibilityRequest,
+    *,
+    weeks_override: int | None = None,
+) -> BenefitPlan:
     is_self_employed = request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES
     required_documents = [
         RequiredDocument(code=doc["code"], name=doc["name"], when=doc["when"])
@@ -176,6 +181,8 @@ def _build_plan(rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequ
     duration_description = None
     if rule.duration_until_birth:
         duration_description = "do dnia porodu"
+    elif weeks_override is not None:
+        weeks = weeks_override
     else:
         weeks = _weeks_for_children_count(rule.weeks_by_child_count, request.children_count)
     return BenefitPlan(
@@ -187,6 +194,63 @@ def _build_plan(rule: BenefitRuleVersion, request: MaternityLeaveEligibilityRequ
         deadlines=list(rule.deadlines),
         legal_basis=list(rule.legal_basis),
     )
+
+
+# Kodeks pracy art. 1801 §1 zdanie 1: "W razie urodzenia martwego dziecka lub zgonu
+# dziecka przed upływem 8 tygodni życia, pracownicy przysługuje urlop macierzyński w
+# wymiarze 8 tygodni po porodzie [...]". Zdanie 2 (więcej niż jedno dziecko przy jednym
+# porodzie): wymiar "stosowny do liczby dzieci pozostałych przy życiu" - czyli standardowa
+# tabela wg LICZBY PRZEŻYWSZYCH dzieci, nie 8 tygodni wprost (chyba że przeżyło 0 - patrz
+# niżej). §1-2 przewidują też próg "nie krócej niż 7 dni od zgonu dziecka" oraz odrębną
+# ścieżkę dla zgonu PO 8. tygodniu życia dziecka (§2) - CELOWO nie modelowane tutaj, bo
+# wymagałyby dokładnego wieku dziecka w dniu zgonu, którego obecny schemat nie przechwytuje;
+# sygnalizowane ostrzeżeniem zamiast zgadywanej liczby.
+_STILLBIRTH_OR_INFANT_DEATH_SINGLE_CHILD_WEEKS = 8
+_STILLBIRTH_DEATH_TIMING_WARNING = (
+    "Jeśli zgon dziecka nastąpił blisko lub po 8. tygodniu życia, może obowiązywać inny "
+    "próg (co najmniej 7 dni od zgonu dziecka, Kodeks pracy art. 1801 §1-2) - nie jest tu "
+    "weryfikowany, sprawdź ręcznie."
+)
+
+
+def _resolve_maternity_leave_weeks(
+    rule: BenefitRuleVersion,
+    children_count: int,
+    is_stillbirth_or_infant_death: bool | None,
+    children_survived_count: int | None,
+) -> tuple[int | None, list[str]]:
+    """Wymiar standardowego urlopu macierzyńskiego, z uwzględnieniem Kodeks pracy art.
+    1801 (martwe urodzenie/wczesny zgon dziecka skraca urlop). Zwraca ``(None, [])``
+    wyłącznie gdy jest więcej niż 1 dziecko, doszło do martwego urodzenia/zgonu, ale nie
+    wiadomo ile dzieci przeżyło - wywołujący powinien to zgłosić jako brakujące dane,
+    nie zgadywać ani pokazywać pełnego, niepomniejszonego wymiaru."""
+    if not is_stillbirth_or_infant_death:
+        return _weeks_for_children_count(rule.weeks_by_child_count, children_count), []
+
+    if children_count == 1:
+        return _STILLBIRTH_OR_INFANT_DEATH_SINGLE_CHILD_WEEKS, [
+            "Martwe urodzenie albo zgon dziecka przed 8. tygodniem życia - urlop "
+            "macierzyński w wymiarze 8 tygodni (Kodeks pracy art. 1801 §1). "
+            + _STILLBIRTH_DEATH_TIMING_WARNING
+        ]
+
+    if children_survived_count is None:
+        return None, []
+
+    if children_survived_count <= 0:
+        return _STILLBIRTH_OR_INFANT_DEATH_SINGLE_CHILD_WEEKS, [
+            "Wszystkie dzieci z tego porodu zmarły/urodziły się martwe - przyjęto wymiar "
+            "8 tygodni przez analogię do przypadku jednodzietnego (Kodeks pracy art. 1801 "
+            "§1); przepis nie precyzuje tej sytuacji wprost przy więcej niż jednym dziecku "
+            "- zweryfikuj ręcznie. " + _STILLBIRTH_DEATH_TIMING_WARNING
+        ]
+
+    return _weeks_for_children_count(rule.weeks_by_child_count, children_survived_count), [
+        f"Część dzieci z tego porodu zmarła/urodziła się martwa - wymiar urlopu "
+        f"macierzyńskiego ustalony wg {children_survived_count} dzieci pozostałych przy "
+        f"życiu (z {children_count} łącznie), nie wg łącznej liczby dzieci (Kodeks pracy "
+        "art. 1801 §1). " + _STILLBIRTH_DEATH_TIMING_WARNING
+    ]
 
 
 def evaluate_maternity_leave_eligibility(
@@ -270,9 +334,28 @@ def evaluate_maternity_leave_eligibility(
         request, rule, met_conditions, unmet_conditions, missing_data, solutions, missing_fields
     )
 
+    weeks_override, stillbirth_warnings = _resolve_maternity_leave_weeks(
+        rule,
+        request.children_count,
+        request.is_stillbirth_or_infant_death,
+        request.children_survived_count,
+    )
+    if (
+        request.is_stillbirth_or_infant_death
+        and request.children_count > 1
+        and request.children_survived_count is None
+    ):
+        _missing(
+            missing_data,
+            missing_fields,
+            "children_survived_count",
+            "liczba dzieci z tego porodu, które przeżyły (wpływa na wymiar urlopu "
+            "macierzyńskiego przy martwym urodzeniu/zgonie - Kodeks pracy art. 1801 §1)",
+        )
+
     status = _decide_status(missing_data, unmet_conditions, solutions)
 
-    warnings: list[str] = []
+    warnings: list[str] = list(stillbirth_warnings)
     if request.insurance_title in _SELF_EMPLOYED_LIKE_TITLES:
         warnings.append(
             "Osoby prowadzące pozarolniczą działalność gospodarczą składały dotąd "
@@ -292,7 +375,11 @@ def evaluate_maternity_leave_eligibility(
     is_standard_path_open = status == EligibilityStatus.likely_eligible or (
         status == EligibilityStatus.requires_verification and not unmet_conditions
     )
-    plan = _build_plan(rule, request) if is_standard_path_open else None
+    plan = (
+        _build_plan(rule, request, weeks_override=weeks_override)
+        if is_standard_path_open and weeks_override is not None
+        else None
+    )
 
     return EligibilityResult(
         benefit_code=BENEFIT_CODE,

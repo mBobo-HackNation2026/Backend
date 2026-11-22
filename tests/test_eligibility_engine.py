@@ -94,6 +94,106 @@ def test_insured_mother_twins_gets_31_weeks() -> None:
     assert result.plan.weeks == 31
 
 
+# --- Kodeks pracy art. 1801: martwe urodzenie / wczesny zgon dziecka skraca urlop ---
+
+
+def test_stillbirth_single_child_gets_8_weeks_not_20() -> None:
+    """Regression test for a real gap found by external QA (scenarios 011/018/019/
+    028/031/042/058): the engine used to ignore is_stillbirth_or_infant_death
+    entirely for the standard maternity-leave duration and always returned the full
+    20-week table value. Kodeks pracy art. 1801 §1 caps this at 8 weeks for a single
+    child."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1, insured_at_birth=True, is_stillbirth_or_infant_death=True
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 8
+    assert any("art. 1801" in w for w in result.warnings)
+
+
+def test_non_stillbirth_still_gets_full_20_weeks() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=1, insured_at_birth=True, is_stillbirth_or_infant_death=False
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.plan is not None
+    assert result.plan.weeks == 20
+    assert not result.warnings
+
+
+def test_stillbirth_unknown_status_does_not_change_default_behavior() -> None:
+    """is_stillbirth_or_infant_death defaults to None (unasked) for the overwhelming
+    majority of real requests - must not regress to blocking the plan or changing the
+    duration just because this new field was never answered."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=True)
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.plan is not None
+    assert result.plan.weeks == 20
+    assert not result.missing_data
+
+
+def test_stillbirth_multiple_children_requires_survived_count_when_missing() -> None:
+    """Scenario 030-shaped case: 2 children, stillbirth/death flagged, but we don't
+    know how many survived - Kodeks pracy art. 1801 §1 sizes the leave to the number
+    of children who survived, which the engine cannot guess. Must not silently fall
+    back to the full non-reduced 2-child table value (31 weeks)."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=2, insured_at_birth=True, is_stillbirth_or_infant_death=True
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.requires_verification
+    assert result.plan is None
+    assert any(info.field == "children_survived_count" for info in result.missing_fields)
+
+
+def test_stillbirth_multiple_children_one_survivor_uses_survivor_count_table() -> None:
+    """Mixed outcome (e.g. twins, one stillborn, one alive): duration must be sized to
+    the SURVIVING child count (1 -> 20 weeks here), not the full 2-child table (31
+    weeks) and not the flat 8-week single-child figure."""
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=2,
+        insured_at_birth=True,
+        is_stillbirth_or_infant_death=True,
+        children_survived_count=1,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.status == EligibilityStatus.likely_eligible
+    assert result.plan is not None
+    assert result.plan.weeks == 20
+
+
+def test_stillbirth_multiple_children_zero_survivors_gets_8_weeks() -> None:
+    rule = _make_rule()
+    request = MaternityLeaveEligibilityRequest(
+        children_count=2,
+        insured_at_birth=True,
+        is_stillbirth_or_infant_death=True,
+        children_survived_count=0,
+    )
+
+    result = evaluate_maternity_leave_eligibility(request, rule)
+
+    assert result.plan is not None
+    assert result.plan.weeks == 8
+
+
 def test_not_insured_with_no_special_reason_is_not_eligible() -> None:
     rule = _make_rule()
     request = MaternityLeaveEligibilityRequest(children_count=1, insured_at_birth=False)

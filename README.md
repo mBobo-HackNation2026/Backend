@@ -59,7 +59,23 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   logiki po stronie silnika (patrz sekcja "W trakcie" niżej).
 - **9 świadczeń w pełni zaimplementowane** (realna logika oceny):
   - `zasilek_macierzynski_urlop_macierzynski` — zasiłek macierzyński za okres
-    urlopu macierzyńskiego.
+    urlopu macierzyńskiego. Uwzględnia Kodeks pracy art. 1801 (**nowość**):
+    martwe urodzenie albo zgon dziecka przed 8. tygodniem życia skraca urlop
+    do 8 tygodni (zamiast pełnej tabeli wg liczby dzieci) - znaleziona przez
+    zewnętrzne testy QA luka, wcześniej pole `is_stillbirth_or_infant_death`
+    było odczytywane tylko przez zasiłek pogrzebowy, nigdy przez ten
+    evaluator. Przy więcej niż jednym dziecku z tego samego porodu wymiar
+    liczy się wg liczby dzieci, które przeżyły (nowe pole
+    `children_survived_count`) - bez tej informacji silnik świadomie NIE
+    zgaduje i zwraca `requires_verification` zamiast pełnego, zawyżonego
+    wymiaru. Świadomie NIE modeluje progu "nie krócej niż 7 dni od zgonu"
+    ani odrębnej ścieżki dla zgonu po 8. tygodniu życia dziecka (art. 1801
+    §1-2) - wymagałyby dokładnego wieku dziecka w dniu zgonu, którego
+    schemat nie przechwytuje; sygnalizowane ostrzeżeniem zamiast zgadywane.
+    Ten sam mechanizm (`_resolve_maternity_leave_weeks`, współdzielone z
+    kalkulatorem) - **nie** dotyczy urlopu ojcowskiego ani urlopu przy
+    adopcji/rodzinie zastępczej (art. 1801 dotyczy wyłącznie urlopu po
+    własnym porodzie).
   - `zasilek_w_wysokosci_zasilku_macierzynskiego` — alternatywna ścieżka z
     ustawy zasiłkowej art. 30, dostępna gdy ubezpieczenie ustało w ciąży
     wskutek upadłości/likwidacji/śmierci pracodawcy (z weryfikacją, czy

@@ -285,6 +285,18 @@ class MaternityLeaveEligibilityRequest(BaseModel):
             "pochówku, nie od zgonu (patrz days_since_burial). None = nieznane."
         ),
     )
+    children_survived_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Liczba dzieci z tego samego porodu, które pozostały przy życiu - potrzebna "
+            "WYŁĄCZNIE gdy is_stillbirth_or_infant_death=True i children_count > 1, żeby "
+            "ustalić wymiar urlopu macierzyńskiego 'stosowny do liczby dzieci pozostałych "
+            "przy życiu' (Kodeks pracy art. 1801 §1 zdanie 2). Ignorowane przy jednym "
+            "dziecku (wymiar to wtedy zawsze 8 tygodni) albo gdy "
+            "is_stillbirth_or_infant_death nie jest True. None = nieznane."
+        ),
+    )
     days_since_burial: int | None = Field(
         default=None,
         ge=0,

@@ -16,6 +16,7 @@ from app.calculator.schemas import (
 )
 from app.db.models.benefit_rule import BenefitRuleVersion
 from app.eligibility.engine import (
+    _resolve_maternity_leave_weeks,
     _resolve_supplementary_leave_cutoff_week,
     _weeks_for_children_count,
 )
@@ -252,8 +253,22 @@ def _resolve_segments(
         days = weeks * 7
         return days, [(days, rule.rate_percentage)], warnings
 
-    # zasilek_macierzynski_urlop_macierzynski, urlop_ojcowski,
-    # urlop_na_warunkach_urlopu_macierzynskiego: płaska tabela tygodni wg liczby dzieci.
+    if benefit_code == MATERNITY_LEAVE_BENEFIT_CODE:
+        weeks, warnings = _resolve_maternity_leave_weeks(
+            rule,
+            request.children_count,
+            request.is_stillbirth_or_infant_death,
+            request.children_survived_count,
+        )
+        if weeks is None:
+            return None, [], warnings
+        days = weeks * 7
+        return days, [(days, rule.rate_percentage)], warnings
+
+    # urlop_ojcowski, urlop_na_warunkach_urlopu_macierzynskiego: płaska tabela tygodni
+    # wg liczby dzieci (Kodeks pracy art. 1801 dotyczy wyłącznie urlopu macierzyńskiego
+    # po własnym porodzie, nie urlopu ojcowskiego ani urlopu przy adopcji/rodzinie
+    # zastępczej - żadne dziecko "nie urodziło się martwe" w kontekście przysposobienia).
     weeks = _weeks_for_children_count(rule.weeks_by_child_count, request.children_count)
     days = weeks * 7
     return days, [(days, rule.rate_percentage)], []
