@@ -18,6 +18,7 @@ def log_request(
     status_code: int,
     request_payload: dict,
     response_payload: dict,
+    user_id: str | None = None,
 ) -> RequestLogEntry:
     entry = RequestLogEntry(
         endpoint=endpoint,
@@ -25,6 +26,7 @@ def log_request(
         status_code=status_code,
         request_payload=request_payload,
         response_payload=response_payload,
+        user_id=user_id,
     )
     db.add(entry)
     db.commit()

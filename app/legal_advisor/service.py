@@ -166,7 +166,11 @@ def _fallback_response(
 
 
 def explain_eligibility_result(
-    db: Session, benefit_code: str, payload: MaternityLeaveEligibilityRequest
+    db: Session,
+    benefit_code: str,
+    payload: MaternityLeaveEligibilityRequest,
+    *,
+    user_id: str | None = None,
 ) -> LegalAdvisorExplainResponse:
     evaluate = ELIGIBILITY_EVALUATORS.get(benefit_code)
     if evaluate is None:
@@ -252,6 +256,7 @@ def explain_eligibility_result(
         status_code=200,
         request_payload=payload.model_dump(mode="json"),
         response_payload=response.model_dump(mode="json"),
+        user_id=user_id,
     )
     response.request_log_entry_id = log_entry.id
     return response

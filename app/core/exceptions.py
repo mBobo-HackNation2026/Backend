@@ -47,6 +47,13 @@ class IntegrationError(AppError):
     error_code = "integration_error"
 
 
+class RateLimitedError(AppError):
+    """Zgłaszany, gdy nadawca przekroczył dopuszczalną liczbę żądań w danym oknie czasu."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    error_code = "rate_limited"
+
+
 def _error_response(error_code: str, message: str) -> JSONResponse:
     return JSONResponse(content={"error_code": error_code, "message": message})
 

@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.admin.request_log import log_request
+from app.auth.security import get_current_user_optional
 from app.core.exceptions import NotFoundError
+from app.db.models.user import User
 from app.db.session import get_db
 from app.eligibility.registry import ELIGIBILITY_EVALUATORS
 from app.eligibility.rules_repository import get_current_rule
@@ -17,7 +19,10 @@ router = APIRouter(prefix="/eligibility", tags=["eligibility"])
     summary="Oceń uprawnienie do wskazanego świadczenia",
 )
 async def check_eligibility(
-    benefit_code: str, payload: MaternityLeaveEligibilityRequest, db: Session = Depends(get_db)
+    benefit_code: str,
+    payload: MaternityLeaveEligibilityRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> EligibilityResult:
     evaluate = ELIGIBILITY_EVALUATORS.get(benefit_code)
     if evaluate is None:
@@ -31,5 +36,6 @@ async def check_eligibility(
         status_code=200,
         request_payload=payload.model_dump(mode="json"),
         response_payload=result.model_dump(mode="json"),
+        user_id=current_user.id if current_user else None,
     )
     return result

@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     formalities,
     health,
     legal_advisor,
+    legal_feedback,
     mock_zus,
 )
 
@@ -21,6 +22,7 @@ api_router.include_router(calculator.router)
 api_router.include_router(mock_zus.router)
 api_router.include_router(formalities.router)
 api_router.include_router(legal_advisor.router)
+api_router.include_router(legal_feedback.router)
 
 # Kolejne moduły API będą podpinane tutaj w miarę implementacji:
 # - documents     -> upload i analiza PDF (PyMuPDF)

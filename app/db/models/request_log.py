@@ -22,8 +22,17 @@ class RequestLogEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     endpoint: Mapped[str] = mapped_column(
         String(100)
-    )  # "eligibility_check" | "calculate" | "compare_parental_leave"
+    )  # "eligibility_check" | "calculate" | "compare_parental_leave" | "legal_advisor_explain"
     benefit_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status_code: Mapped[int] = mapped_column(Integer)
     request_payload: Mapped[dict] = mapped_column(JSON)
     response_payload: Mapped[dict] = mapped_column(JSON)
+    # Nullable, opportunistic: populated only when the caller happened to send a
+    # session Bearer token (eligibility/calculate/legal-advisor are and remain fully
+    # anonymous-callable - this never gates them). Exists so app/legal_feedback/ can
+    # safely check "does this evaluation belong to the submitting session" without an
+    # IDOR risk - a feedback submission can only ever reference an entry whose
+    # user_id matches the submitter's own. Entries recorded before this column
+    # existed (or made without a token) have user_id=None and can never be
+    # referenced by feedback - a deliberate limitation, not retrofitted.
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

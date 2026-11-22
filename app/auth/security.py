@@ -93,6 +93,26 @@ def get_user_for_refresh(
     return _load_user_for_token(payload, db)
 
 
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Like ``get_current_user``, but returns ``None`` instead of 401 when no token is
+    sent (or it's invalid/expired/revoked) - for endpoints that must stay fully
+    callable without a session (eligibility/calculate/legal-advisor) but opportunistically
+    record who the caller was when a valid session happens to be present, so later
+    features (e.g. app/legal_feedback/) can check evaluation ownership without
+    requiring auth everywhere. Never raises - a bad token here simply means
+    "anonymous", not an error."""
+    if credentials is None:
+        return None
+    try:
+        payload = _decode_user_token(credentials, verify_exp=True)
+        return _load_user_for_token(payload, db)
+    except HTTPException:
+        return None
+
+
 def require_authenticated_user(user: User = Depends(get_current_user)) -> User:
     if user.status != AuthStatus.authenticated:
         raise HTTPException(

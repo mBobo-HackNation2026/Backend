@@ -348,6 +348,41 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     dostarcza użytkownik lokalnie, nigdy w repo). Bez klucza endpoint działa
     normalnie w trybie fallback.
   - Zob. pamięć projektu `project-ebobo-legal-advisor`.
+- **eBobo Legal Intelligence — Etap 2, Faza A (nowość)**: zgłaszanie wątpliwości
+  co do wyniku oceny (`app/legal_feedback/`). Analiza AI zgłoszenia i panel
+  administratora (przeglądanie/zmiana statusu) to **Faza B, osobne zadanie** -
+  świadomie nie w tym zakresie.
+  - `POST /api/v1/legal-feedback` — wymaga sesji (`Authorization: Bearer <token>`
+    z `POST /auth/session`). Body: `{request_log_entry_id, feedback_type:
+    "incorrect_result"|"missing_case"|"incorrect_explanation"|"zus_discrepancy"|
+    "missing_input", user_comment, expected_result?}`. `expected_result` to
+    wyłącznie opinia zgłaszającego - nigdy nowa ocena uprawnienia, nigdy nie
+    zmienia zapisanego wyniku.
+  - **Luka architektoniczna znaleziona i naprawiona przy tej okazji**:
+    `request_log_entries` w ogóle nie zapisywało, kto wykonał dany request -
+    `eligibility/check`/`calculate`/`compare`/`legal-advisor/explain` są i
+    pozostają w pełni anonimowe (zero wymaganej autoryzacji). Dodano nullable
+    `user_id` na `RequestLogEntry`, wypełniane **opcjonalnie** przez nową
+    zależność `get_current_user_optional` (nigdy nie zwraca 401 - brak/zły/
+    wygasły token = po prostu "anonimowo", jak dotąd). Żaden istniejący
+    endpoint nie wymaga teraz tokenu częściej niż wcześniej.
+  - **Zgłoszenie można powiązać wyłącznie z własną oceną**: backend sprawdza
+    `request_log_entry.user_id == current_user.id` - w przeciwnym razie (albo
+    gdy wpis nie istnieje, albo gdy powstał anonimowo i `user_id` jest `None`)
+    zwraca `404`, nigdy `403` - nie potwierdzamy w ten sposób istnienia cudzego
+    wpisu (ochrona przed IDOR). W praktyce jedyny endpoint zwracający dziś
+    `request_log_entry_id` w odpowiedzi to `/legal-advisor/explain` - to
+    zamierzona ścieżka: wyjaśnienie → użytkownik się nie zgadza → zgłoszenie.
+  - **Rate limiting bez nowej zależności**: proste liczenie w bazie (maks. 10
+    zgłoszeń na godzinę na `user_id`) zamiast dodawania biblioteki dla jednego
+    endpointu - `HTTP 429` po przekroczeniu.
+  - Oryginalny wpis `request_log` **nigdy nie jest modyfikowany** - zgłoszenie to
+    osobny rekord (`LegalFeedback`) z własnym `status` (domyślnie `new`),
+    przechowujący `rules_version` skopiowane z ORYGINALNEJ oceny (nie z
+    momentu zgłoszenia). Minimalizacja danych: zgłoszenie NIE kopiuje pełnego
+    `request_payload`/`response_payload` - te już żyją w powiązanym wpisie
+    `request_log`, dostępnym przez FK.
+  - Zob. pamięć projektu `project-ebobo-legal-feedback`.
 
 ### W trakcie / tymczasowe
 
@@ -400,6 +435,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 6 | Przewodnik po formalnościach — dokumenty, formularze, terminy, miejsce złożenia, ryzyka utraty uprawnień, następne kroki | ✅ zrobione - patrz "Zrobione" wyżej; lista organizacji charytatywnych celowo pusta (wymaga zweryfikowanych danych) |
 | 7 | Minimalna edycja parametrów prawnych w panelu administratora (silnik musi używać aktualnych wartości/wersji) | ⬜ nierozpoczęte |
 | 8 | eBobo Legal Intelligence — Funkcja 1: wyjaśnianie wyniku oceny przez AI (OpenRouter), ugruntowane w lokalnej bazie wiedzy prawnej (minimalny RAG) | ✅ zrobione - patrz "Zrobione" wyżej; Funkcje 2-4 (odwołania od ZUS, feedback, zatwierdzanie zmian reguł) odłożone |
+| 9 | eBobo Legal Intelligence — Etap 2, Faza A: zgłaszanie wątpliwości co do oceny (`POST /legal-feedback`) | ✅ zrobione - patrz "Zrobione" wyżej; Faza B (analiza AI zgłoszenia + panel administratora) osobne zadanie |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
@@ -435,6 +471,9 @@ app/
   legal_advisor/    # eBobo Legal Intelligence, Funkcja 1 - AI (OpenRouter) wyjaśnia wynik oceny
     schemas.py      # AIExplanationRaw, GroundedRecommendation, LegalAdvisorExplainResponse
     service.py      # explain_eligibility_result() - re-uruchamia silnik, groundinguje w legal_knowledge
+  legal_feedback/   # eBobo Legal Intelligence, Etap 2 Faza A - zgłaszanie wątpliwości co do oceny
+    schemas.py      # LegalFeedbackCreateRequest/Response
+    service.py      # submit_feedback() - sprawdza własność wpisu, rate limit
   legal_knowledge/  # "minimalny RAG" - statyczna baza fragmentów wiedzy prawnej, bez bazy wektorowej
     fragments.py    # LEGAL_FRAGMENTS (23 fragmenty: ustawa zasiłkowa, Kodeks pracy, Poradnik ZUS)
     repository.py   # get_fragments_for_benefit(), get_fragment_by_id()
@@ -458,7 +497,7 @@ app/
   services/         # (zarezerwowane, obecnie puste - logika biznesowa żyje w modułach wyżej)
   main.py           # fabryka aplikacji FastAPI (create_app), montuje /admin jako static files
 static/admin/       # statyczny frontend panelu administracyjnego (vanilla HTML/JS, bez build stepu)
-tests/              # 216 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
+tests/              # 228 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
 ```
 
 Zasady architektoniczne:
@@ -625,6 +664,17 @@ request_log_entry_id: int | null
 `source=="fallback"` (brak klucza/timeout/zła odpowiedź/brak fragmentów wiedzy
 dla świadczenia) - zawsze HTTP 200 z sensowną treścią zbudowaną z samego
 wyniku silnika, nigdy 500.
+
+### Legal Feedback
+
+**`POST /legal-feedback`** - wymaga `Authorization: Bearer <token>` (z
+`POST /auth/session`). Request: `{request_log_entry_id, feedback_type, user_comment,
+expected_result?}`. Response `201` (`LegalFeedbackResponse`): `{id,
+request_log_entry_id, benefit_code, feedback_type, user_comment, expected_result,
+status: "new", rules_version, created_at}`. `404` gdy wpis nie istnieje albo
+nie należy do tej sesji; `429` po przekroczeniu 10 zgłoszeń/godzinę; `401` bez
+tokenu. Analiza AI zgłoszenia i panel admina (przeglądanie/status) - osobne
+zadanie (Faza B).
 
 ### MockZUSProvider
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.admin.request_log import log_request
+from app.auth.security import get_current_user_optional
 from app.calculator.engine import calculate_benefit, compare_parental_leave_variants
 from app.calculator.schemas import (
     CalculatedAmount,
@@ -9,6 +10,7 @@ from app.calculator.schemas import (
     ParentalLeaveCompareResponse,
 )
 from app.core.exceptions import NotFoundError
+from app.db.models.user import User
 from app.db.session import get_db
 from app.eligibility.registry import ELIGIBILITY_EVALUATORS
 from app.eligibility.rules_repository import get_current_rule
@@ -24,7 +26,10 @@ router = APIRouter(prefix="/benefits", tags=["calculator"])
     summary="Wylicz kwotę i okres świadczenia (niezależnie od potwierdzonych uprawnień)",
 )
 async def calculate(
-    benefit_code: str, payload: MaternityLeaveEligibilityRequest, db: Session = Depends(get_db)
+    benefit_code: str,
+    payload: MaternityLeaveEligibilityRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> CalculatedAmount:
     if benefit_code not in ELIGIBILITY_EVALUATORS:
         raise NotFoundError(f"Nieznany kod świadczenia: '{benefit_code}'")
@@ -37,6 +42,7 @@ async def calculate(
         status_code=200,
         request_payload=payload.model_dump(mode="json"),
         response_payload=result.model_dump(mode="json"),
+        user_id=current_user.id if current_user else None,
     )
     return result
 
@@ -47,7 +53,9 @@ async def calculate(
     summary="Porównaj warianty podziału urlopu rodzicielskiego między rodzicami",
 )
 async def compare_parental_leave(
-    payload: ParentalLeaveCompareRequest, db: Session = Depends(get_db)
+    payload: ParentalLeaveCompareRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> ParentalLeaveCompareResponse:
     rule = get_current_rule(db, PARENTAL_LEAVE_BENEFIT_CODE)
     result = compare_parental_leave_variants(rule, payload)
@@ -58,5 +66,6 @@ async def compare_parental_leave(
         status_code=200,
         request_payload=payload.model_dump(mode="json"),
         response_payload=result.model_dump(mode="json"),
+        user_id=current_user.id if current_user else None,
     )
     return result
