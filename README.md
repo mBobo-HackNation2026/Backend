@@ -918,6 +918,17 @@ pokazuje log zapytań do silnika uprawnień/kalkulatora - tabela z filtrem po
 odczytu - zob. sekcję "Zrobione" wyżej i pamięć projektu
 `project-ebobo-admin-request-log`.
 
+**Widoki "Zgłoszenia (Legal Feedback)" i "Monitoring jakości silnika" (nowość)** -
+dwie kolejne karty na dashboardzie, każda z listą (filtry + paginacja po stronie
+API), panelem szczegółów (oryginalna ocena/historia statusów/historia analiz AI)
+i akcjami administratora wprost z UI: zmiana statusu (+ uzasadnienie), dla
+Monitoringu jakości silnika także zmiana priorytetu, oraz przycisk "Uruchom
+analizę" (OpenRouter) w obu widokach. Żadna z tych akcji nie zmienia niczego
+automatycznie poza samym żądaniem administratora - analiza AI nigdy nie zmienia
+statusu/priorytetu sama z siebie, zgodnie z zasadami Etap 2/3. Czysty
+vanilla JS bez frameworka/build stepu, ten sam wzorzec co istniejący widok
+"Wnioski" (`sessionStorage` + `fetch` + pokaż/ukryj sekcje).
+
 **Zanim cokolwiek wystawisz poza `localhost`, zmień `ADMIN_PASSWORD` i
 `SECRET_KEY` w `.env`** — wartości domyślne są tylko do developmentu.
 

@@ -75,6 +75,237 @@
           <pre id="requests-detail-response"></pre>
         </div>
       </section>
+
+      <section id="legal-feedback-view" class="hidden list-view">
+        <button id="lf-back-btn" class="btn btn--ghost">&larr; Dashboard</button>
+        <h1>Zgłoszenia (Legal Feedback)</h1>
+        <p class="muted">
+          Wątpliwości zgłoszone przez użytkowników co do wyniku oceny uprawnień - to
+          sygnał do przeglądu, nie potwierdzony błąd silnika.
+        </p>
+
+        <div class="filters-row">
+          <label class="filter-label">
+            Świadczenie
+            <input type="text" id="lf-filter-benefit" placeholder="np. urlop_ojcowski" />
+          </label>
+          <label class="filter-label">
+            Typ zgłoszenia
+            <select id="lf-filter-type">
+              <option value="">Wszystkie</option>
+              <option value="incorrect_result">incorrect_result</option>
+              <option value="missing_case">missing_case</option>
+              <option value="incorrect_explanation">incorrect_explanation</option>
+              <option value="zus_discrepancy">zus_discrepancy</option>
+              <option value="missing_input">missing_input</option>
+            </select>
+          </label>
+          <label class="filter-label">
+            Status
+            <select id="lf-filter-status">
+              <option value="">Wszystkie</option>
+              <option value="new">new</option>
+              <option value="under_review">under_review</option>
+              <option value="confirmed_issue">confirmed_issue</option>
+              <option value="not_an_issue">not_an_issue</option>
+              <option value="needs_more_information">needs_more_information</option>
+              <option value="closed">closed</option>
+            </select>
+          </label>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Świadczenie</th>
+              <th>Typ</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="lf-table-body"></tbody>
+        </table>
+        <p id="lf-empty" class="muted hidden">Brak zgłoszeń.</p>
+
+        <div id="lf-detail" class="detail-panel hidden">
+          <h2>Zgłoszenie #<span id="lf-detail-id"></span></h2>
+          <dl class="detail-fields">
+            <dt>Status</dt>
+            <dd id="lf-detail-status"></dd>
+            <dt>Świadczenie</dt>
+            <dd id="lf-detail-benefit"></dd>
+            <dt>Typ zgłoszenia</dt>
+            <dd id="lf-detail-type"></dd>
+            <dt>Komentarz użytkownika</dt>
+            <dd id="lf-detail-comment"></dd>
+            <dt>Oczekiwany wynik (opinia zgłaszającego)</dt>
+            <dd id="lf-detail-expected"></dd>
+            <dt>Wersja reguł (oryginalnej oceny)</dt>
+            <dd id="lf-detail-rules-version"></dd>
+          </dl>
+
+          <h3>Oryginalna, niezmieniona ocena</h3>
+          <pre id="lf-detail-original"></pre>
+
+          <h3>Decyzja administratora</h3>
+          <div class="action-row">
+            <select id="lf-status-select">
+              <option value="new">new</option>
+              <option value="under_review">under_review</option>
+              <option value="confirmed_issue">confirmed_issue</option>
+              <option value="not_an_issue">not_an_issue</option>
+              <option value="needs_more_information">needs_more_information</option>
+              <option value="closed">closed</option>
+            </select>
+            <input type="text" id="lf-status-reason" placeholder="Uzasadnienie (opcjonalnie)" />
+            <button id="lf-status-submit" class="btn">Zmień status</button>
+          </div>
+          <p id="lf-status-message" class="muted hidden"></p>
+
+          <h3>Historia statusów</h3>
+          <ul id="lf-history-list" class="history-list"></ul>
+          <p id="lf-history-empty" class="muted hidden">Brak zmian statusu.</p>
+
+          <h3>Analiza prawna (OpenRouter)</h3>
+          <p class="muted">
+            Hipoteza do weryfikacji przez administratora - nigdy nie zmienia statusu
+            automatycznie.
+          </p>
+          <button id="lf-analyze-btn" class="btn">Uruchom analizę</button>
+          <p id="lf-analyze-message" class="muted hidden"></p>
+          <div id="lf-analyses-list"></div>
+        </div>
+      </section>
+
+      <section id="engine-quality-view" class="hidden list-view">
+        <button id="eq-back-btn" class="btn btn--ghost">&larr; Dashboard</button>
+        <h1>Monitoring jakości silnika</h1>
+        <p class="muted">
+          Przypadki wykryte przez wewnętrzny monitoring (brak wiedzy prawnej, nieobsługiwane
+          kody świadczeń, zgłoszenia użytkowników) - niezależnie od tego, czy ktokolwiek
+          cokolwiek zgłosił.
+        </p>
+
+        <div class="filters-row">
+          <label class="filter-label">
+            Świadczenie
+            <input type="text" id="eq-filter-benefit" placeholder="np. urlop_ojcowski" />
+          </label>
+          <label class="filter-label">
+            Typ sygnału
+            <select id="eq-filter-signal">
+              <option value="">Wszystkie</option>
+              <option value="missing_legal_knowledge">missing_legal_knowledge</option>
+              <option value="unsupported_case">unsupported_case</option>
+              <option value="repeated_unresolved_case">repeated_unresolved_case</option>
+              <option value="user_reported_discrepancy">user_reported_discrepancy</option>
+              <option value="legal_source_validation_failure">
+                legal_source_validation_failure
+              </option>
+            </select>
+          </label>
+          <label class="filter-label">
+            Status
+            <select id="eq-filter-status">
+              <option value="">Wszystkie</option>
+              <option value="new">new</option>
+              <option value="under_review">under_review</option>
+              <option value="confirmed_issue">confirmed_issue</option>
+              <option value="not_an_issue">not_an_issue</option>
+              <option value="closed">closed</option>
+            </select>
+          </label>
+          <label class="filter-label">
+            Priorytet
+            <select id="eq-filter-priority">
+              <option value="">Wszystkie</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+          </label>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Sygnał</th>
+              <th>Świadczenie</th>
+              <th>Wystąpień</th>
+              <th>Priorytet</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="eq-table-body"></tbody>
+        </table>
+        <p id="eq-empty" class="muted hidden">Brak spraw.</p>
+
+        <div id="eq-detail" class="detail-panel hidden">
+          <h2>Sprawa #<span id="eq-detail-id"></span></h2>
+          <dl class="detail-fields">
+            <dt>Typ sygnału</dt>
+            <dd id="eq-detail-signal"></dd>
+            <dt>Świadczenie</dt>
+            <dd id="eq-detail-benefit"></dd>
+            <dt>Wersja reguł</dt>
+            <dd id="eq-detail-rules-version"></dd>
+            <dt>Identyfikator problemu</dt>
+            <dd id="eq-detail-problem-id"></dd>
+            <dt>Liczba wystąpień</dt>
+            <dd id="eq-detail-occurrences"></dd>
+            <dt>Powód</dt>
+            <dd id="eq-detail-reason"></dd>
+            <dt>Status</dt>
+            <dd id="eq-detail-status"></dd>
+            <dt>Priorytet</dt>
+            <dd id="eq-detail-priority"></dd>
+          </dl>
+
+          <h3>Zmiana statusu</h3>
+          <div class="action-row">
+            <select id="eq-status-select">
+              <option value="new">new</option>
+              <option value="under_review">under_review</option>
+              <option value="confirmed_issue">confirmed_issue</option>
+              <option value="not_an_issue">not_an_issue</option>
+              <option value="closed">closed</option>
+            </select>
+            <input type="text" id="eq-status-reason" placeholder="Uzasadnienie (opcjonalnie)" />
+            <button id="eq-status-submit" class="btn">Zmień status</button>
+          </div>
+          <p id="eq-status-message" class="muted hidden"></p>
+
+          <h3>Zmiana priorytetu</h3>
+          <div class="action-row">
+            <select id="eq-priority-select">
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+            <input
+              type="text"
+              id="eq-priority-reason"
+              placeholder="Uzasadnienie (opcjonalnie)"
+            />
+            <button id="eq-priority-submit" class="btn">Zmień priorytet</button>
+          </div>
+          <p id="eq-priority-message" class="muted hidden"></p>
+
+          <h3>Historia zmian</h3>
+          <ul id="eq-history-list" class="history-list"></ul>
+          <p id="eq-history-empty" class="muted hidden">Brak zmian.</p>
+
+          <h3>Analiza prawna (OpenRouter)</h3>
+          <p class="muted">
+            Hipoteza do weryfikacji przez administratora - nigdy nie zmienia
+            statusu/priorytetu automatycznie.
+          </p>
+          <button id="eq-analyze-btn" class="btn">Uruchom analizę</button>
+          <p id="eq-analyze-message" class="muted hidden"></p>
+          <div id="eq-analyses-list"></div>
+        </div>
+      </section>
     </main>
 
     <script src="app.js"></script>

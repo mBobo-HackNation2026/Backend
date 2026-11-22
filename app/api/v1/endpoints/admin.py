@@ -69,6 +69,16 @@ async def dashboard(current_admin: str = Depends(get_current_admin)) -> dict:
         "modules": [
             {"key": "rules", "label": "Parametry świadczeń", "status": "planned"},
             {"key": "submissions", "label": "Wnioski użytkowników", "status": "available"},
+            {
+                "key": "legal_feedback",
+                "label": "Zgłoszenia (Legal Feedback)",
+                "status": "available",
+            },
+            {
+                "key": "engine_quality",
+                "label": "Monitoring jakości silnika",
+                "status": "available",
+            },
             {"key": "documents", "label": "Przesłane dokumenty PDF", "status": "planned"},
             {"key": "integrations", "label": "Integracje ZUS / mObywatel", "status": "planned"},
         ],
