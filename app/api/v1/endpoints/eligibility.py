@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.admin.request_log import log_request
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.eligibility.registry import ELIGIBILITY_EVALUATORS
@@ -22,4 +23,13 @@ async def check_eligibility(
     if evaluate is None:
         raise NotFoundError(f"Nieznany kod świadczenia: '{benefit_code}'")
     rule = get_current_rule(db, benefit_code)
-    return evaluate(payload, rule)
+    result = evaluate(payload, rule)
+    log_request(
+        db,
+        endpoint="eligibility_check",
+        benefit_code=benefit_code,
+        status_code=200,
+        request_payload=payload.model_dump(mode="json"),
+        response_payload=result.model_dump(mode="json"),
+    )
+    return result

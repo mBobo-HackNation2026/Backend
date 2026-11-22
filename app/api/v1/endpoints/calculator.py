@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.admin.request_log import log_request
 from app.calculator.engine import calculate_benefit, compare_parental_leave_variants
 from app.calculator.schemas import (
     CalculatedAmount,
@@ -28,7 +29,16 @@ async def calculate(
     if benefit_code not in ELIGIBILITY_EVALUATORS:
         raise NotFoundError(f"Nieznany kod świadczenia: '{benefit_code}'")
     rule = get_current_rule(db, benefit_code)
-    return calculate_benefit(benefit_code, rule, payload)
+    result = calculate_benefit(benefit_code, rule, payload)
+    log_request(
+        db,
+        endpoint="calculate",
+        benefit_code=benefit_code,
+        status_code=200,
+        request_payload=payload.model_dump(mode="json"),
+        response_payload=result.model_dump(mode="json"),
+    )
+    return result
 
 
 @router.post(
@@ -40,4 +50,13 @@ async def compare_parental_leave(
     payload: ParentalLeaveCompareRequest, db: Session = Depends(get_db)
 ) -> ParentalLeaveCompareResponse:
     rule = get_current_rule(db, PARENTAL_LEAVE_BENEFIT_CODE)
-    return compare_parental_leave_variants(rule, payload)
+    result = compare_parental_leave_variants(rule, payload)
+    log_request(
+        db,
+        endpoint="compare_parental_leave",
+        benefit_code=PARENTAL_LEAVE_BENEFIT_CODE,
+        status_code=200,
+        request_payload=payload.model_dump(mode="json"),
+        response_payload=result.model_dump(mode="json"),
+    )
+    return result

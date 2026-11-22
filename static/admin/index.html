@@ -41,6 +41,40 @@
 
         <div id="modules" class="modules"></div>
       </section>
+
+      <section id="requests-view" class="hidden requests-view">
+        <button id="requests-back-btn" class="btn btn--ghost">&larr; Dashboard</button>
+        <h1>Wnioski</h1>
+        <p class="muted">
+          Log zapytań wysłanych do silnika uprawnień i kalkulatora - tylko do odczytu.
+        </p>
+
+        <label class="filter-label">
+          Filtruj po kodzie świadczenia
+          <input type="text" id="requests-filter" placeholder="np. urlop_ojcowski" />
+        </label>
+
+        <table class="requests-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Endpoint</th>
+              <th>Świadczenie</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="requests-table-body"></tbody>
+        </table>
+        <p id="requests-empty" class="muted hidden">Brak zarejestrowanych wniosków.</p>
+
+        <div id="requests-detail" class="requests-detail hidden">
+          <h2>Szczegóły wniosku #<span id="requests-detail-id"></span></h2>
+          <h3>Request</h3>
+          <pre id="requests-detail-request"></pre>
+          <h3>Response</h3>
+          <pre id="requests-detail-response"></pre>
+        </div>
+      </section>
     </main>
 
     <script src="app.js"></script>

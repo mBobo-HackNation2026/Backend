@@ -229,6 +229,17 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   - Zob. pamięć projektu `project-ebobo-formalities-guide`.
 - **Panel administracyjny (MVP)**: jeden administrator z env, logowanie JWT
   (`POST /api/v1/admin/login`), frontend w `static/admin/`.
+  - **Nowość**: widok "Wnioski" - log zapytań wysłanych do silnika uprawnień i
+    kalkulatora (`POST /eligibility/check`, `POST /benefits/calculate`,
+    `POST /benefits/compare/urlop-rodzicielski`), **tylko do odczytu**.
+    `GET /api/v1/admin/request-log` (lista, filtr po `benefit_code`) i
+    `GET /api/v1/admin/request-log/{id}` (pełny request+response). Świadomie
+    bez edycji - admin edytujący cudze zadeklarowane dane po fakcie
+    fałszowałby historię oceny, sprzecznie z tym, jak projekt traktuje
+    wersjonowanie (nigdy nie nadpisujemy cicho). Pętla feedbacku
+    ("oznacz tę ocenę jako błędną i wykorzystaj do poprawy reguł") jest
+    świadomie odłożona na później, na wyraźną prośbę użytkownika. Zob.
+    pamięć projektu `project-ebobo-admin-request-log`.
 
 ### W trakcie / tymczasowe
 
@@ -342,7 +353,14 @@ MVP: jeden użytkownik administratora skonfigurowany przez zmienne środowiskowe
 (brak modelu użytkowników w bazie na tym etapie). Logowanie wydaje token JWT
 (`POST /api/v1/admin/login`), który frontend (`static/admin/`) trzyma w
 `sessionStorage` i wysyła jako `Authorization: Bearer <token>` do chronionych
-endpointów (`/api/v1/admin/me`, `/api/v1/admin/dashboard`).
+endpointów (`/api/v1/admin/me`, `/api/v1/admin/dashboard`,
+`/api/v1/admin/request-log`, `/api/v1/admin/request-log/{id}`).
+
+Widok "Wnioski" w `static/admin/` (karta "Wnioski użytkowników" na dashboardzie)
+pokazuje log zapytań do silnika uprawnień/kalkulatora - tabela z filtrem po
+`benefit_code`, kliknięcie wiersza pokazuje pełny request/response. Tylko do
+odczytu - zob. sekcję "Zrobione" wyżej i pamięć projektu
+`project-ebobo-admin-request-log`.
 
 **Zanim cokolwiek wystawisz poza `localhost`, zmień `ADMIN_PASSWORD` i
 `SECRET_KEY` w `.env`** — wartości domyślne są tylko do developmentu.

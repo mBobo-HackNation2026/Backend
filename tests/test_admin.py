@@ -47,3 +47,5 @@ def test_dashboard_with_valid_token_returns_modules(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert "modules" in body
+    submissions_module = next(m for m in body["modules"] if m["key"] == "submissions")
+    assert submissions_module["status"] == "available"
