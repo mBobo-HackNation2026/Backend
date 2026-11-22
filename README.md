@@ -420,6 +420,45 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
   - Dwie nowe tabele (`legal_feedback_analyses`, `legal_feedback_status_history`)
     doszły przez kolejną migrację Alembic, bez żadnej ręcznej ingerencji w bazę.
   - Zob. pamięć projektu `project-ebobo-legal-feedback-admin-review`.
+- **eBobo Legal Intelligence — Etap 3 (nowość)**: wewnętrzny monitoring jakości
+  silnika i kolejka przypadków do weryfikacji (`app/engine_quality/`). **Zmiana
+  filozofii produktu** (zob. pamięć projektu
+  `project-ebobo-legal-intelligence-two-tier-direction`): wolumen zgłoszeń
+  użytkowników to sygnał, nigdy dowód błędu prawnego - silnik ma też sam
+  wykrywać sytuacje wymagające przeglądu, niezależnie od tego, czy ktokolwiek
+  cokolwiek zgłosi.
+  - **Deterministyczne wykrywanie sygnałów** (nigdy zwykły brak danych w
+    ankiecie - ten trafia do `missing_data`/`missing_fields`, nie tutaj):
+    `missing_legal_knowledge` (wykryte w `/legal-advisor/explain`, gdy brak
+    fragmentów `app/legal_knowledge` dla świadczenia), `unsupported_case`
+    (wykryte w `/eligibility/check`, gdy kod świadczenia nie ma evaluatora w
+    rejestrze), `user_reported_discrepancy` (każde zgłoszenie
+    `POST /legal-feedback` trafia też tutaj jako sygnał). Pozostałe dwa typy
+    (`legal_source_validation_failure`, `repeated_unresolved_case`) są
+    **zdefiniowane, ale celowo bez wyzwalacza w tej iteracji** - brief
+    jawnie każe dodawać kolejne rodzaje monitoringu dopiero po sprawdzeniu
+    jakości sygnałów z MVP.
+  - **Deduplikacja/grupowanie bez danych osobowych**: `group_key = typ
+    sygnału:kod_świadczenia:wersja_reguły`. Powtórne wystąpienie tego samego
+    sygnału (dla otwartego przypadku) nie tworzy nowego wiersza - inkrementuje
+    `occurrence_count` na istniejącym. Po przekroczeniu progu (3) priorytet
+    automatycznie eskaluje do `high` (`changed_by="system"` w historii) -
+    to jest realizacja `repeated_unresolved_case`: eskalacja istniejącego
+    przypadku, nie osobno wyzwalany sygnał.
+  - `GET /api/v1/admin/engine-quality/cases` — lista, filtrowanie
+    (`signal_type`/`benefit_code`/`status_filter`/`priority`), paginacja,
+    sortowanie.
+  - `GET /api/v1/admin/engine-quality/cases/{id}` — szczegóły + pełna historia
+    zmian statusu/priorytetu + pełna historia analiz AI.
+  - `PATCH .../status` i `PATCH .../priority` — **wyłącznie** administrator
+    zmienia, każda zmiana zapisana w historii (kto/kiedy/stara→nowa
+    wartość/uzasadnienie).
+  - `POST .../analyze` — ta sama integracja OpenRouter i ta sama baza wiedzy
+    prawnej co Legal Advisor/Faza B (żadna nowa integracja LLM). Nigdy nie
+    zmienia statusu/priorytetu sprawy - to wyłącznie hipoteza. Awaria
+    dostawcy AI nigdy nie tworzy ani nie modyfikuje przypadku - zapisuje się
+    tylko jako nieudana próba analizy (`analysis_status="failed"`).
+  - Zob. pamięć projektu `project-ebobo-engine-quality-monitoring`.
 
 ### W trakcie / tymczasowe
 
@@ -475,6 +514,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 9 | eBobo Legal Intelligence — Etap 2, Faza A: zgłaszanie wątpliwości co do oceny (`POST /legal-feedback`) | ✅ zrobione - patrz "Zrobione" wyżej |
 | 10 | Migracje bazy (Alembic) — wymaganie P0 z briefu Etap 2 Fazy B, zabezpieczenie przed `rm -f app.db` jako "metodą" zmiany schematu | ✅ zrobione - patrz "Migracje bazy (Alembic)" niżej |
 | 11 | eBobo Legal Intelligence — Etap 2, Faza B: panel admina do przeglądu zgłoszeń + analiza AI przez OpenRouter | ✅ zrobione - patrz "Zrobione" wyżej; odwołania od ZUS i automatyczne poprawianie reguł (Funkcje 2-4 pierwotnego briefu) nadal odłożone |
+| 12 | eBobo Legal Intelligence — Etap 3: wewnętrzny monitoring jakości silnika (wykrywanie sygnałów + kolejka przypadków, niezależnie od zgłoszeń użytkownika) | ✅ zrobione (MVP: 3 z 5 typów sygnałów mają wyzwalacz) - patrz "Zrobione" wyżej; automatyczne poprawianie/zatwierdzanie reguł nadal nie jest implementowane |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
@@ -510,9 +550,14 @@ app/
   legal_advisor/    # eBobo Legal Intelligence, Funkcja 1 - AI (OpenRouter) wyjaśnia wynik oceny
     schemas.py      # AIExplanationRaw, GroundedRecommendation, LegalAdvisorExplainResponse
     service.py      # explain_eligibility_result() - re-uruchamia silnik, groundinguje w legal_knowledge
-  legal_feedback/   # eBobo Legal Intelligence, Etap 2 Faza A - zgłaszanie wątpliwości co do oceny
-    schemas.py      # LegalFeedbackCreateRequest/Response
-    service.py      # submit_feedback() - sprawdza własność wpisu, rate limit
+  legal_feedback/   # eBobo Legal Intelligence, Etap 2 - zgłaszanie wątpliwości (Faza A) + przegląd admina (Faza B)
+    schemas.py      # LegalFeedbackCreateRequest/Response, AIFeedbackAnalysisRaw
+    service.py      # submit_feedback() - sprawdza własność wpisu, rate limit, zgłasza sygnał do engine_quality
+    admin_service.py  # list/detail/update_status/run_analysis (Faza B)
+  engine_quality/   # eBobo Legal Intelligence, Etap 3 - wewnętrzny monitoring jakości silnika
+    schemas.py      # EngineQualityCaseSummary/Detail, status/priority update requesty
+    service.py      # record_signal() (dedupikacja/grupowanie), list/detail/update_status/
+                     #   update_priority/run_case_analysis
   legal_knowledge/  # "minimalny RAG" - statyczna baza fragmentów wiedzy prawnej, bez bazy wektorowej
     fragments.py    # LEGAL_FRAGMENTS (23 fragmenty: ustawa zasiłkowa, Kodeks pracy, Poradnik ZUS)
     repository.py   # get_fragments_for_benefit(), get_fragment_by_id()
@@ -536,7 +581,7 @@ app/
   services/         # (zarezerwowane, obecnie puste - logika biznesowa żyje w modułach wyżej)
   main.py           # fabryka aplikacji FastAPI (create_app), montuje /admin jako static files
 static/admin/       # statyczny frontend panelu administracyjnego (vanilla HTML/JS, bez build stepu)
-tests/              # 248 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
+tests/              # 264 testy pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
 alembic/            # migracje schematu (alembic/versions/) - jedyny sposób zmiany schematu bazy
 ```
 
@@ -747,6 +792,16 @@ zadanie (Faza B).
 | `GET /admin/legal-feedback/{id}` | Zgłoszenie + `original_evaluation` (niezmieniony wpis `request_log`) + `analyses[]` (historia, najnowsze pierwsze) + `status_history[]` (historia, najnowsze pierwsze). |
 | `POST /admin/legal-feedback/{id}/analyze` | Uruchamia analizę AI (OpenRouter), zwraca nowy, niezmienny rekord analizy. `analysis_status: "completed"\|"failed"`. Nigdy nie zmienia `status` zgłoszenia. |
 | `PATCH /admin/legal-feedback/{id}/status` | Body: `{status, reason?}`. Zmienia status, zapisuje wpis w historii (`changed_by`, `reason`, `changed_at`). |
+
+**Engine Quality Monitoring (Etap 3)** - wszystkie też wymagają admin tokenu:
+
+| Endpoint | Opis |
+|---|---|
+| `GET /admin/engine-quality/cases?signal_type=...&benefit_code=...&status_filter=...&priority=...&limit=...&offset=...&order=asc\|desc` | Lista przypadków w wewnętrznej kolejce. |
+| `GET /admin/engine-quality/cases/{id}` | Przypadek + `history[]` (zmiany statusu/priorytetu) + `analyses[]` (historia analiz AI). |
+| `PATCH /admin/engine-quality/cases/{id}/status` | Body: `{status, reason?}`. Statusy: `new`/`under_review`/`confirmed_issue`/`not_an_issue`/`closed`. |
+| `PATCH /admin/engine-quality/cases/{id}/priority` | Body: `{priority, reason?}`. Priorytety: `low`/`medium`/`high`. |
+| `POST /admin/engine-quality/cases/{id}/analyze` | Jak w Legal Feedback - nowy, niezmienny rekord analizy, nigdy nie zmienia statusu/priorytetu. |
 
 ### Health
 

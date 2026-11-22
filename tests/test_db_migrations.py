@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.db.session import _ALEMBIC_INI_PATH, upgrade_or_stamp_legacy
 
 _BASELINE_REVISION = "4e7573eced51"
-_HEAD_REVISION = "8d4d310a1b3f"
+_HEAD_REVISION = "c4e4ee530be9"
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +48,9 @@ def test_fresh_database_runs_every_migration_from_scratch(
         "legal_feedback",
         "legal_feedback_analyses",
         "legal_feedback_status_history",
+        "engine_quality_cases",
+        "engine_quality_case_history",
+        "engine_quality_case_analyses",
         "alembic_version",
     } <= tables
 

@@ -3,6 +3,14 @@ go widział (potrzebne do tworzenia tabel / migracji).
 """
 
 from app.db.models.benefit_rule import BenefitRuleVersion, BenefitType
+from app.db.models.engine_quality import (
+    EngineQualityCase,
+    EngineQualityCaseAnalysis,
+    EngineQualityCaseHistory,
+    EngineQualityCasePriority,
+    EngineQualityCaseStatus,
+    EngineQualitySignalType,
+)
 from app.db.models.legal_feedback import (
     LegalFeedback,
     LegalFeedbackAnalysis,
@@ -19,6 +27,12 @@ __all__ = [
     "AuthStatus",
     "BenefitRuleVersion",
     "BenefitType",
+    "EngineQualityCase",
+    "EngineQualityCaseAnalysis",
+    "EngineQualityCaseHistory",
+    "EngineQualityCasePriority",
+    "EngineQualityCaseStatus",
+    "EngineQualitySignalType",
     "LegalFeedback",
     "LegalFeedbackAnalysis",
     "LegalFeedbackAnalysisClassification",

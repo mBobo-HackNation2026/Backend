@@ -9,8 +9,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, RateLimitedError
+from app.db.models.engine_quality import EngineQualitySignalType
 from app.db.models.legal_feedback import LegalFeedback, LegalFeedbackStatus
 from app.db.models.request_log import RequestLogEntry
+from app.engine_quality.service import record_signal
 from app.legal_feedback.schemas import LegalFeedbackCreateRequest
 
 # Proste liczenie w bazie, bez dodatkowej biblioteki - wystarczające przy jednym
@@ -66,4 +68,17 @@ def submit_feedback(
     db.add(feedback)
     db.commit()
     db.refresh(feedback)
+
+    # Etap 3: zgłoszenie użytkownika to jeden z sygnałów wewnętrznego monitoringu -
+    # nigdy jedyny ani automatycznie rozstrzygający, tylko wejście do tej samej kolejki.
+    record_signal(
+        db,
+        signal_type=EngineQualitySignalType.user_reported_discrepancy,
+        benefit_code=feedback.benefit_code,
+        rules_version=feedback.rules_version,
+        request_log_entry_id=entry.id,
+        legal_feedback_id=feedback.id,
+        reason=f"Zgłoszenie użytkownika ({feedback.feedback_type.value})",
+    )
+
     return feedback

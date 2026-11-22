@@ -4,11 +4,13 @@ from sqlalchemy.orm import Session
 from app.admin.request_log import log_request
 from app.auth.security import get_current_user_optional
 from app.core.exceptions import NotFoundError
+from app.db.models.engine_quality import EngineQualitySignalType
 from app.db.models.user import User
 from app.db.session import get_db
 from app.eligibility.registry import ELIGIBILITY_EVALUATORS
 from app.eligibility.rules_repository import get_current_rule
 from app.eligibility.schemas import EligibilityResult, MaternityLeaveEligibilityRequest
+from app.engine_quality.service import record_signal
 
 router = APIRouter(prefix="/eligibility", tags=["eligibility"])
 
@@ -26,6 +28,14 @@ async def check_eligibility(
 ) -> EligibilityResult:
     evaluate = ELIGIBILITY_EVALUATORS.get(benefit_code)
     if evaluate is None:
+        # Etap 3: silnik jawnie wskazuje nieobsługiwany przypadek - kod świadczenia nie
+        # ma żadnego evaluatora w rejestrze.
+        record_signal(
+            db,
+            signal_type=EngineQualitySignalType.unsupported_case,
+            benefit_code=benefit_code,
+            reason=f"Nieznany kod świadczenia w rejestrze: '{benefit_code}'",
+        )
         raise NotFoundError(f"Nieznany kod świadczenia: '{benefit_code}'")
     rule = get_current_rule(db, benefit_code)
     result = evaluate(payload, rule)

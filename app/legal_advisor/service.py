@@ -31,9 +31,11 @@ from app.ai_provider.client import (
     request_json_completion,
 )
 from app.core.exceptions import NotFoundError
+from app.db.models.engine_quality import EngineQualitySignalType
 from app.eligibility.registry import ELIGIBILITY_EVALUATORS
 from app.eligibility.rules_repository import get_current_rule
 from app.eligibility.schemas import EligibilityResult, MaternityLeaveEligibilityRequest
+from app.engine_quality.service import record_signal
 from app.legal_advisor.schemas import AIExplanationRaw, LegalAdvisorExplainResponse
 from app.legal_knowledge.repository import get_fragments_for_benefit
 from app.legal_knowledge.schemas import LegalFragment, display_label
@@ -259,4 +261,17 @@ def explain_eligibility_result(
         user_id=user_id,
     )
     response.request_log_entry_id = log_entry.id
+
+    if not candidate_fragments:
+        # Etap 3: luka w bazie wiedzy prawnej wykryta przez sam silnik, niezależnie od
+        # tego, czy ktokolwiek zgłosi to jako feedback.
+        record_signal(
+            db,
+            signal_type=EngineQualitySignalType.missing_legal_knowledge,
+            benefit_code=benefit_code,
+            rules_version=rule.version,
+            request_log_entry_id=log_entry.id,
+            reason=f"Brak fragmentów app/legal_knowledge dla świadczenia '{benefit_code}'",
+        )
+
     return response
