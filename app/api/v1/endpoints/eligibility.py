@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.eligibility.registry import ELIGIBILITY_EVALUATORS
 from app.eligibility.rules_repository import get_current_rule
 from app.eligibility.schemas import EligibilityResult, MaternityLeaveEligibilityRequest
-from app.engine_quality.service import record_signal
+from app.engine_quality.service import record_signal_safely
 
 router = APIRouter(prefix="/eligibility", tags=["eligibility"])
 
@@ -29,8 +29,9 @@ async def check_eligibility(
     evaluate = ELIGIBILITY_EVALUATORS.get(benefit_code)
     if evaluate is None:
         # Etap 3: silnik jawnie wskazuje nieobsługiwany przypadek - kod świadczenia nie
-        # ma żadnego evaluatora w rejestrze.
-        record_signal(
+        # ma żadnego evaluatora w rejestrze. record_signal_safely nigdy nie rzuca -
+        # awaria monitoringu nie może przesłonić poprawnego 404 (Etap 3.1 §5).
+        record_signal_safely(
             db,
             signal_type=EngineQualitySignalType.unsupported_case,
             benefit_code=benefit_code,
@@ -39,7 +40,7 @@ async def check_eligibility(
         raise NotFoundError(f"Nieznany kod świadczenia: '{benefit_code}'")
     rule = get_current_rule(db, benefit_code)
     result = evaluate(payload, rule)
-    log_request(
+    log_entry = log_request(
         db,
         endpoint="eligibility_check",
         benefit_code=benefit_code,
@@ -48,4 +49,18 @@ async def check_eligibility(
         response_payload=result.model_dump(mode="json"),
         user_id=current_user.id if current_user else None,
     )
+
+    # Etap 3.1: ustrukturyzowane markery jawnie nieobsługiwanych przypadków prawnych,
+    # faktycznie wykryte przez ten evaluator (nigdy nie zmieniają status/plan powyżej).
+    for marker in result.legal_limitation_markers:
+        record_signal_safely(
+            db,
+            signal_type=EngineQualitySignalType.unsupported_case,
+            benefit_code=benefit_code,
+            rules_version=rule.version,
+            problem_id=marker.rule_id,
+            request_log_entry_id=log_entry.id,
+            reason=marker.reason,
+        )
+
     return result

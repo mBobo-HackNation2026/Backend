@@ -15,10 +15,26 @@ Nigdy nie duplikuje danych z ``request_log``/``legal_feedback`` - tylko referenc
 import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# Statusy traktowane jako "zamknięte" - sygnał, który wróci po zamknięciu/odrzuceniu
+# sprawy, zaczyna nową grupę zamiast cicho nadpisywać decyzję pracownika (zob.
+# app/engine_quality/service.py:record_signal).
+_CLOSED_STATUSES_SQL = "'not_an_issue','closed'"
 
 
 class EngineQualitySignalType(enum.StrEnum):
@@ -54,6 +70,21 @@ class EngineQualityCaseStatus(enum.StrEnum):
 
 class EngineQualityCase(Base):
     __tablename__ = "engine_quality_cases"
+    __table_args__ = (
+        # Zabezpieczenie przed wyścigiem żądań (Etap 3.1 §3): dwa równoczesne żądania,
+        # które oba nie widzą jeszcze istniejącego przypadku, nie mogą obie wstawić
+        # wiersza z tym samym group_key dla wciąż otwartej sprawy - baza odrzuci drugą
+        # próbę (app/engine_quality/service.py łapie to i dogrywa jako update).
+        # Zamknięte/odrzucone sprawy (not_an_issue/closed) są wyłączone z tego
+        # ograniczenia, żeby powrót tego samego sygnału mógł zacząć nową grupę.
+        Index(
+            "uq_engine_quality_case_open_group_key",
+            "group_key",
+            unique=True,
+            sqlite_where=text(f"status NOT IN ({_CLOSED_STATUSES_SQL})"),
+            postgresql_where=text(f"status NOT IN ({_CLOSED_STATUSES_SQL})"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     signal_type: Mapped[EngineQualitySignalType] = mapped_column(
@@ -61,6 +92,12 @@ class EngineQualityCase(Base):
     )
     benefit_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     rules_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Stabilny identyfikator KONKRETNEGO problemu, gdy dostępny (np.
+    # LegalLimitationMarker.rule_id) - rozróżnia różne problemy w obrębie tego samego
+    # świadczenia/wersji reguły, które inaczej zlałyby się w jedną grupę (Etap 3.1 §3).
+    # Null, gdy sygnał nie ma takiego drobniejszego podziału (np. unsupported_case dla
+    # nieznanego kodu świadczenia - sam kod już jednoznacznie identyfikuje problem).
+    problem_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     request_log_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("request_log_entries.id"), nullable=True
     )
@@ -68,9 +105,9 @@ class EngineQualityCase(Base):
         ForeignKey("legal_feedback.id"), nullable=True
     )
     reason: Mapped[str] = mapped_column(Text)
-    # signal_type:benefit_code:rules_version - deterministyczny klucz grupowania, nigdy
-    # dane osobowe. Zob. app/engine_quality/service.py:_compute_group_key.
-    group_key: Mapped[str] = mapped_column(String(200))
+    # signal_type:benefit_code:rules_version:problem_id - deterministyczny klucz
+    # grupowania, nigdy dane osobowe. Zob. app/engine_quality/service.py:_compute_group_key.
+    group_key: Mapped[str] = mapped_column(String(250))
     occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
     priority: Mapped[EngineQualityCasePriority] = mapped_column(
         Enum(EngineQualityCasePriority, native_enum=False, length=10),

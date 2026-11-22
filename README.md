@@ -459,6 +459,44 @@ wskazywać `related_benefit_code` innego świadczenia do sprawdzenia osobno.
     dostawcy AI nigdy nie tworzy ani nie modyfikuje przypadku - zapisuje się
     tylko jako nieudana próba analizy (`analysis_status="failed"`).
   - Zob. pamięć projektu `project-ebobo-engine-quality-monitoring`.
+- **eBobo Legal Intelligence — Etap 3.1 (nowość)**: ustrukturyzowane wykrywanie
+  konkretnych, znanych ograniczeń prawnych w evaluatorach (zamiast wyłącznie
+  tekstowych `warnings`/komentarzy w kodzie).
+  - **Pierwszy (i na razie jedyny) ustrukturyzowany marker**: w
+    `evaluate_maternity_leave_eligibility`, gdy
+    `employment_ended_reason=naruszenie_prawa_wyrokiem_sadu` - znana,
+    udokumentowana w kodzie niejednoznaczność klasyfikacji (art. 30 ust. 1 pkt
+    2), w 100% wykrywalna w czasie wykonania (prosty warunek na już
+    dostępnych danych). Inne rozważane przypadki (np. próg 9 tygodni przy
+    adopcji blisko granicy wieku) odrzucone jako **niewystarczająco
+    niezawodnie wykrywalne** bez zbierania nowych, drobniejszych danych -
+    świadomie nie dodano dla nich markera (brief: "nie twórz markerów dla
+    ograniczeń, których wystąpienia silnik nie potrafi wiarygodnie wykryć").
+  - Marker (`EligibilityResult.legal_limitation_markers`, nowe pole, zawsze
+    puste dla zdecydowanej większości ocen) **nigdy nie zmienia
+    status/plan** - czysto dodatkowa informacja, konsumowana przez
+    `app/engine_quality` w `/eligibility/check` i `/legal-advisor/explain`
+    (ten sam evaluator wywoływany ponownie w obu miejscach).
+  - **Lepsza deduplikacja**: `group_key` rozszerzony o `problem_id`
+    (stabilny identyfikator konkretnego problemu, np. nazwa markera) - różne
+    problemy dla tego samego świadczenia/wersji reguły nie zlewają się już
+    w jedną grupę.
+  - **Ochrona przed wyścigiem żądań**: częściowy unikalny indeks w bazie
+    (`group_key`, tylko dla spraw jeszcze nieotwartych) - dwa równoczesne
+    żądania nigdy nie utworzą duplikatu tej samej otwartej sprawy;
+    `record_signal` łapie konflikt i dogrywa go jako aktualizację.
+  - **Rozdzielone typy feedbacku użytkownika**: nie każde zgłoszenie
+    `POST /legal-feedback` oznacza rozbieżność prawną.
+    `incorrect_result`/`zus_discrepancy` → sygnał `user_reported_discrepancy`;
+    `missing_case` → sygnał `unsupported_case` (to ten sam rodzaj problemu co
+    wykryty przez kod, tylko zgłoszony przez człowieka);
+    `incorrect_explanation`/`missing_input` → **bez sygnału** dla
+    `engine_quality` (nadal pełnoprawny, widoczny feedback w istniejącym
+    systemie Faza A/B, po prostu nie trafia do kolejki jakości silnika).
+  - **Odporność**: `record_signal_safely` nigdy nie rzuca wyjątku dalej -
+    awaria zapisu diagnostycznego (np. baza chwilowo niedostępna) nigdy nie
+    zamienia poprawnie policzonej oceny uprawnień w HTTP 500.
+  - Zob. pamięć projektu `project-ebobo-engine-quality-structured-markers`.
 
 ### W trakcie / tymczasowe
 
@@ -515,6 +553,7 @@ ZUS. Dane zadeklarowane przez użytkownika i symulowane potwierdzenie z
 | 10 | Migracje bazy (Alembic) — wymaganie P0 z briefu Etap 2 Fazy B, zabezpieczenie przed `rm -f app.db` jako "metodą" zmiany schematu | ✅ zrobione - patrz "Migracje bazy (Alembic)" niżej |
 | 11 | eBobo Legal Intelligence — Etap 2, Faza B: panel admina do przeglądu zgłoszeń + analiza AI przez OpenRouter | ✅ zrobione - patrz "Zrobione" wyżej; odwołania od ZUS i automatyczne poprawianie reguł (Funkcje 2-4 pierwotnego briefu) nadal odłożone |
 | 12 | eBobo Legal Intelligence — Etap 3: wewnętrzny monitoring jakości silnika (wykrywanie sygnałów + kolejka przypadków, niezależnie od zgłoszeń użytkownika) | ✅ zrobione (MVP: 3 z 5 typów sygnałów mają wyzwalacz) - patrz "Zrobione" wyżej; automatyczne poprawianie/zatwierdzanie reguł nadal nie jest implementowane |
+| 13 | eBobo Legal Intelligence — Etap 3.1: ustrukturyzowane markery konkretnych ograniczeń prawnych w evaluatorach, lepsza deduplikacja, ochrona przed wyścigiem żądań, rozdzielenie typów feedbacku | ✅ zrobione (1 realny marker wdrożony - reszta rozważanych przypadków uznana za niewystarczająco niezawodnie wykrywalna) - patrz "Zrobione" wyżej |
 
 Niższy priorytet (odłożone, nie zaczynamy bez wyraźnej prośby): automatyczny
 OCR, kompleksowe parsowanie skanów, społeczność/forum, rozbudowany niezbędnik
@@ -581,7 +620,7 @@ app/
   services/         # (zarezerwowane, obecnie puste - logika biznesowa żyje w modułach wyżej)
   main.py           # fabryka aplikacji FastAPI (create_app), montuje /admin jako static files
 static/admin/       # statyczny frontend panelu administracyjnego (vanilla HTML/JS, bez build stepu)
-tests/              # 264 testy pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
+tests/              # 277 testów pytest, jeden plik na moduł; conftest.py = izolowana baza in-memory per test
 alembic/            # migracje schematu (alembic/versions/) - jedyny sposób zmiany schematu bazy
 ```
 

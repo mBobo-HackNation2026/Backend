@@ -19,9 +19,11 @@ Zasady (z briefu, nieprzejednane):
 """
 
 import json
+import logging
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai_provider.client import (
@@ -44,6 +46,8 @@ from app.db.models.request_log import RequestLogEntry
 from app.engine_quality.schemas import AIEngineQualityAnalysisRaw
 from app.legal_knowledge.repository import get_fragments_for_benefit
 from app.legal_knowledge.schemas import LegalFragment
+
+logger = logging.getLogger(__name__)
 
 _MAX_LIST_LIMIT = 200
 # Próg, po którym powtarzający się sygnał (ten sam group_key) automatycznie podnosi
@@ -83,28 +87,17 @@ nie wymyślaj nowych id ani przepisów.
 
 
 def _compute_group_key(
-    signal_type: EngineQualitySignalType, benefit_code: str | None, rules_version: int | None
-) -> str:
-    version_part = rules_version if rules_version is not None else "none"
-    return f"{signal_type.value}:{benefit_code or 'none'}:{version_part}"
-
-
-def record_signal(
-    db: Session,
-    *,
     signal_type: EngineQualitySignalType,
     benefit_code: str | None,
-    reason: str,
-    rules_version: int | None = None,
-    request_log_entry_id: int | None = None,
-    legal_feedback_id: int | None = None,
-) -> EngineQualityCase:
-    """Zgłasza wykryty sygnał jakościowy - dedupikuje po ``group_key`` (ten sam typ
-    sygnału + świadczenie + wersja reguły) względem przypadków jeszcze nie zamkniętych
-    (``not_an_issue``/``closed`` zaczynają nową grupę, jeśli sygnał pojawi się ponownie
-    - stara decyzja administratora zostaje nienaruszona)."""
-    group_key = _compute_group_key(signal_type, benefit_code, rules_version)
-    existing = (
+    rules_version: int | None,
+    problem_id: str | None,
+) -> str:
+    version_part = rules_version if rules_version is not None else "none"
+    return f"{signal_type.value}:{benefit_code or 'none'}:{version_part}:{problem_id or 'none'}"
+
+
+def _find_open_case(db: Session, group_key: str) -> EngineQualityCase | None:
+    return (
         db.query(EngineQualityCase)
         .filter(EngineQualityCase.group_key == group_key)
         .filter(
@@ -116,42 +109,86 @@ def record_signal(
         .first()
     )
 
-    if existing is not None:
-        existing.occurrence_count += 1
-        existing.reason = reason
-        existing.updated_at = datetime.now(UTC)
-        if request_log_entry_id is not None:
-            existing.request_log_entry_id = request_log_entry_id
-        if legal_feedback_id is not None:
-            existing.legal_feedback_id = legal_feedback_id
-        if (
-            existing.occurrence_count >= _REPEATED_CASE_PRIORITY_ESCALATION_THRESHOLD
-            and existing.priority != EngineQualityCasePriority.high
-        ):
-            old_priority = existing.priority
-            existing.priority = EngineQualityCasePriority.high
-            db.add(
-                EngineQualityCaseHistory(
-                    case_id=existing.id,
-                    field_changed="priority",
-                    old_value=old_priority.value,
-                    new_value=EngineQualityCasePriority.high.value,
-                    changed_by="system",
-                    reason=(
-                        f"Automatyczna eskalacja - sygnał wystąpił już "
-                        f"{existing.occurrence_count} razy "
-                        f"({EngineQualitySignalType.repeated_unresolved_case.value})"
-                    ),
-                )
+
+def _increment_existing(
+    db: Session,
+    existing: EngineQualityCase,
+    *,
+    reason: str,
+    request_log_entry_id: int | None,
+    legal_feedback_id: int | None,
+) -> EngineQualityCase:
+    existing.occurrence_count += 1
+    existing.reason = reason
+    existing.updated_at = datetime.now(UTC)
+    if request_log_entry_id is not None:
+        existing.request_log_entry_id = request_log_entry_id
+    if legal_feedback_id is not None:
+        existing.legal_feedback_id = legal_feedback_id
+    if (
+        existing.occurrence_count >= _REPEATED_CASE_PRIORITY_ESCALATION_THRESHOLD
+        and existing.priority != EngineQualityCasePriority.high
+    ):
+        old_priority = existing.priority
+        existing.priority = EngineQualityCasePriority.high
+        db.add(
+            EngineQualityCaseHistory(
+                case_id=existing.id,
+                field_changed="priority",
+                old_value=old_priority.value,
+                new_value=EngineQualityCasePriority.high.value,
+                changed_by="system",
+                reason=(
+                    f"Automatyczna eskalacja - sygnał wystąpił już "
+                    f"{existing.occurrence_count} razy "
+                    f"({EngineQualitySignalType.repeated_unresolved_case.value})"
+                ),
             )
-        db.commit()
-        db.refresh(existing)
-        return existing
+        )
+    db.commit()
+    db.refresh(existing)
+    return existing
+
+
+def record_signal(
+    db: Session,
+    *,
+    signal_type: EngineQualitySignalType,
+    benefit_code: str | None,
+    reason: str,
+    rules_version: int | None = None,
+    problem_id: str | None = None,
+    request_log_entry_id: int | None = None,
+    legal_feedback_id: int | None = None,
+) -> EngineQualityCase:
+    """Zgłasza wykryty sygnał jakościowy - dedupikuje po ``group_key`` (typ sygnału +
+    świadczenie + wersja reguły + opcjonalny ``problem_id`` konkretnego problemu)
+    względem przypadków jeszcze nie zamkniętych (``not_an_issue``/``closed`` zaczynają
+    nową grupę, jeśli sygnał pojawi się ponownie - stara decyzja administratora zostaje
+    nienaruszona).
+
+    Odporne na wyścig żądań (Etap 3.1 §3): jeśli dwa równoczesne wywołania nie widzą
+    jeszcze nawzajem swojego wiersza i oba próbują wstawić nowy przypadek dla tego
+    samego ``group_key``, częściowy unikalny indeks w bazie odrzuci drugą próbę - ta
+    funkcja łapie ten konflikt i dogrywa go jako aktualizację istniejącego wiersza
+    zamiast pozwolić, by druga próba zakończyła się błędem albo duplikatem.
+    """
+    group_key = _compute_group_key(signal_type, benefit_code, rules_version, problem_id)
+    existing = _find_open_case(db, group_key)
+    if existing is not None:
+        return _increment_existing(
+            db,
+            existing,
+            reason=reason,
+            request_log_entry_id=request_log_entry_id,
+            legal_feedback_id=legal_feedback_id,
+        )
 
     case = EngineQualityCase(
         signal_type=signal_type,
         benefit_code=benefit_code,
         rules_version=rules_version,
+        problem_id=problem_id,
         request_log_entry_id=request_log_entry_id,
         legal_feedback_id=legal_feedback_id,
         reason=reason,
@@ -161,9 +198,44 @@ def record_signal(
         status=EngineQualityCaseStatus.new,
     )
     db.add(case)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Inne, równoczesne żądanie wygrało wyścig i wstawiło wiersz dla tego samego
+        # group_key między naszym sprawdzeniem a naszym INSERT-em - dogrywamy jako
+        # aktualizację tamtego wiersza zamiast tworzyć duplikat.
+        db.rollback()
+        existing = _find_open_case(db, group_key)
+        if existing is None:
+            raise
+        return _increment_existing(
+            db,
+            existing,
+            reason=reason,
+            request_log_entry_id=request_log_entry_id,
+            legal_feedback_id=legal_feedback_id,
+        )
     db.refresh(case)
     return case
+
+
+def record_signal_safely(db: Session, **kwargs) -> EngineQualityCase | None:
+    """Jak ``record_signal``, ale nigdy nie rzuca wyjątku dalej - awaria monitoringu
+    jakości nie może unieważnić poprawnie wykonanej, deterministycznej oceny silnika
+    (Etap 3.1 §5). Loguje bezpieczny komunikat diagnostyczny (typ wyjątku i stack
+    trace z logów serwera - nigdy treść danych wejściowych użytkownika) i kontynuuje
+    bez sygnału zamiast zwrócić HTTP 500 z poprawnie policzonej oceny."""
+    try:
+        return record_signal(db, **kwargs)
+    except Exception:
+        logger.exception(
+            "app.engine_quality.record_signal nie powiodło się - kontynuuję bez sygnału"
+        )
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("Nie udało się wycofać transakcji po awarii record_signal")
+        return None
 
 
 def list_cases(

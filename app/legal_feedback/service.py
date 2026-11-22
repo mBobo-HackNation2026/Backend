@@ -10,15 +10,32 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, RateLimitedError
 from app.db.models.engine_quality import EngineQualitySignalType
-from app.db.models.legal_feedback import LegalFeedback, LegalFeedbackStatus
+from app.db.models.legal_feedback import LegalFeedback, LegalFeedbackStatus, LegalFeedbackType
 from app.db.models.request_log import RequestLogEntry
-from app.engine_quality.service import record_signal
+from app.engine_quality.service import record_signal_safely
 from app.legal_feedback.schemas import LegalFeedbackCreateRequest
 
 # Proste liczenie w bazie, bez dodatkowej biblioteki - wystarczające przy jednym
 # procesie/SQLite i niskim wolumenie tego endpointu.
 _RATE_LIMIT_MAX_PER_HOUR = 10
 _RATE_LIMIT_WINDOW = timedelta(hours=1)
+
+# Etap 3.1 §4: nie każde zgłoszenie oznacza rozbieżność prawną - rozdzielamy typy
+# feedbacku zamiast ślepo kierować wszystkie do tej samej kolejki monitoringu jako
+# "podejrzenie błędu". incorrect_explanation (problem z wyjaśnieniem Legal Advisor) i
+# missing_input (brak możliwości podania danych) zostają pełnoprawnym feedbackiem w
+# app/legal_feedback - widocznym i obsługiwanym przez administratora tak samo jak
+# dotąd - ale same w sobie NIE są sygnałem dla app/engine_quality (None = brak sygnału).
+# missing_case ("silnik nie obsługuje mojej sytuacji") mapuje na unsupported_case, bo
+# to ten sam rodzaj problemu co already-wired detekcja nieznanego kodu świadczenia,
+# tylko zgłoszony przez człowieka zamiast wykryty przez kod.
+_FEEDBACK_TYPE_TO_SIGNAL: dict[LegalFeedbackType, EngineQualitySignalType | None] = {
+    LegalFeedbackType.incorrect_result: EngineQualitySignalType.user_reported_discrepancy,
+    LegalFeedbackType.zus_discrepancy: EngineQualitySignalType.user_reported_discrepancy,
+    LegalFeedbackType.missing_case: EngineQualitySignalType.unsupported_case,
+    LegalFeedbackType.incorrect_explanation: None,
+    LegalFeedbackType.missing_input: None,
+}
 
 
 def _check_rate_limit(db: Session, user_id: str) -> None:
@@ -69,16 +86,19 @@ def submit_feedback(
     db.commit()
     db.refresh(feedback)
 
-    # Etap 3: zgłoszenie użytkownika to jeden z sygnałów wewnętrznego monitoringu -
-    # nigdy jedyny ani automatycznie rozstrzygający, tylko wejście do tej samej kolejki.
-    record_signal(
-        db,
-        signal_type=EngineQualitySignalType.user_reported_discrepancy,
-        benefit_code=feedback.benefit_code,
-        rules_version=feedback.rules_version,
-        request_log_entry_id=entry.id,
-        legal_feedback_id=feedback.id,
-        reason=f"Zgłoszenie użytkownika ({feedback.feedback_type.value})",
-    )
+    # Etap 3/3.1: zgłoszenie użytkownika to jeden z sygnałów wewnętrznego monitoringu -
+    # nigdy jedyny ani automatycznie rozstrzygający, i nie każdy typ zgłoszenia nim jest
+    # (patrz _FEEDBACK_TYPE_TO_SIGNAL powyżej).
+    signal_type = _FEEDBACK_TYPE_TO_SIGNAL[feedback.feedback_type]
+    if signal_type is not None:
+        record_signal_safely(
+            db,
+            signal_type=signal_type,
+            benefit_code=feedback.benefit_code,
+            rules_version=feedback.rules_version,
+            request_log_entry_id=entry.id,
+            legal_feedback_id=feedback.id,
+            reason=f"Zgłoszenie użytkownika ({feedback.feedback_type.value})",
+        )
 
     return feedback

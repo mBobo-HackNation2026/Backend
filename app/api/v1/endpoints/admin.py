@@ -200,6 +200,7 @@ def _build_engine_quality_detail(case, history, analyses) -> EngineQualityCaseDe
         signal_type=case.signal_type,
         benefit_code=case.benefit_code,
         rules_version=case.rules_version,
+        problem_id=case.problem_id,
         request_log_entry_id=case.request_log_entry_id,
         legal_feedback_id=case.legal_feedback_id,
         reason=case.reason,

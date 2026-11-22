@@ -480,6 +480,27 @@ class MissingFieldInfo(BaseModel):
     )
 
 
+class LegalLimitationMarker(BaseModel):
+    """Ustrukturyzowany, wewnętrzny marker diagnostyczny dla jawnie nieobsługiwanego
+    przypadku prawnego faktycznie napotkanego przy ocenie (eBobo Legal Intelligence,
+    Etap 3.1) - wyłącznie dla sytuacji, które evaluator potrafi wiarygodnie wykryć w
+    czasie wykonania (konkretny, sprawdzony warunek), nigdy jako zgadywany/orientacyjny
+    sygnał. Nigdy nie zmienia ``status``/``plan`` wyniku - to czysto dodatkowa
+    informacja, konsumowana przez ``app/engine_quality`` (nigdy bezpośrednio przez
+    silnik uprawnień, który o module monitoringu nic nie wie)."""
+
+    code: str = Field(
+        description="Stabilny kod rodzaju ograniczenia, np. 'unsupported_legal_exception'."
+    )
+    rule_id: str = Field(
+        description="Stabilny identyfikator KONKRETNEGO przypadku - używany do deduplikacji."
+    )
+    requires_manual_review: bool = Field(
+        default=True, description="Czy sytuacja wymaga ręcznego przeglądu przez pracownika."
+    )
+    reason: str = Field(description="Czytelny dla człowieka opis wykrytego ograniczenia.")
+
+
 class EligibilityResult(BaseModel):
     benefit_code: str = Field(description="Kod świadczenia zgodny z definicją w regułach.")
     benefit_name: str = Field(description="Nazwa świadczenia do wyświetlenia użytkownikowi.")
@@ -532,4 +553,12 @@ class EligibilityResult(BaseModel):
     warnings: list[str] = Field(
         default_factory=list,
         description="Ostrzeżenia dla użytkownika, np. o ograniczeniach oceny.",
+    )
+    legal_limitation_markers: list[LegalLimitationMarker] = Field(
+        default_factory=list,
+        description=(
+            "Wewnętrzne markery diagnostyczne dla jawnie nieobsługiwanych przypadków "
+            "prawnych faktycznie wykrytych podczas tej oceny (Etap 3.1) - puste dla "
+            "zdecydowanej większości ocen. Nigdy nie wpływa na status/plan - informacyjne."
+        ),
     )

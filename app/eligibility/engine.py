@@ -14,6 +14,7 @@ from app.eligibility.schemas import (
     EmploymentEndedReason,
     FosterCareType,
     InsuranceTitle,
+    LegalLimitationMarker,
     MaternityLeaveEligibilityRequest,
     MissingFieldInfo,
     PossibleSolution,
@@ -261,6 +262,7 @@ def evaluate_maternity_leave_eligibility(
     missing_data: list[str] = []
     missing_fields: list[MissingFieldInfo] = []
     solutions: list[PossibleSolution] = []
+    legal_limitation_markers: list[LegalLimitationMarker] = []
 
     if request.insured_at_birth is None:
         _missing(
@@ -304,6 +306,23 @@ def evaluate_maternity_leave_eligibility(
             # alternative legal basis, this should plausibly land in met_conditions rather
             # than unmet_conditions/SolutionType.alternative_benefit - that reclassification
             # is a separate future task, tracked in this plan's self-review checklist.
+            # Etap 3.1: reliably detectable at runtime (a plain equality check on data we
+            # already have), so it gets a structured marker for app/engine_quality instead
+            # of staying only a code comment.
+            legal_limitation_markers.append(
+                LegalLimitationMarker(
+                    code="unsupported_legal_exception",
+                    rule_id="maternity_leave_naruszenie_prawa_wyrokiem_sadu_classification",
+                    requires_manual_review=True,
+                    reason=(
+                        "Rozwiązanie umowy w okresie ciąży z naruszeniem przepisów prawa "
+                        "(ustawa zasiłkowa art. 30 ust. 1 pkt 2) jest dziś klasyfikowane "
+                        "jako niespełniony warunek + świadczenie alternatywne (ten sam "
+                        "kod), choć przepis może oznaczać, że standardowy warunek jest "
+                        "już spełniony wprost - wymaga przeglądu prawnego."
+                    ),
+                )
+            )
             solutions.append(
                 PossibleSolution(
                     type=SolutionType.alternative_benefit,
@@ -393,6 +412,7 @@ def evaluate_maternity_leave_eligibility(
         plan=plan,
         rules_version=rule.version,
         warnings=warnings,
+        legal_limitation_markers=legal_limitation_markers,
     )
 
 

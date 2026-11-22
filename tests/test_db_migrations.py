@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.db.session import _ALEMBIC_INI_PATH, upgrade_or_stamp_legacy
 
 _BASELINE_REVISION = "4e7573eced51"
-_HEAD_REVISION = "c4e4ee530be9"
+_HEAD_REVISION = "2901209d56c1"
 
 
 @pytest.fixture(autouse=True)

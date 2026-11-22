@@ -22,6 +22,7 @@ class EngineQualityCaseSummary(BaseModel):
     signal_type: EngineQualitySignalType
     benefit_code: str | None
     rules_version: int | None
+    problem_id: str | None
     request_log_entry_id: int | None
     legal_feedback_id: int | None
     reason: str
